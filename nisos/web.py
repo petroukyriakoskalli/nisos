@@ -360,3 +360,36 @@ def serve(config, host: str = "127.0.0.1", port: int = 8765) -> str:
         server.server_close()
         log.info("UI stopped")
     return url
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point for ``python -m nisos.web``.
+
+    Kept here rather than in ``__main__.py`` so the UI can be launched
+    independently of the CLI -- scripts/nisos-ui.sh reads the URL from the
+    first line of stdout.
+    """
+    import argparse
+    from . import config as config_module
+
+    parser = argparse.ArgumentParser(prog="nisos.web", description="nisos web UI")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="loopback only; changing this exposes an API that can send SMS")
+    parser.add_argument("--config")
+    parser.add_argument("-v", "--verbose", action="store_true")
+    args = parser.parse_args(argv)
+
+    cfg = config_module.load(args.config)
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s  %(levelname).1s  %(name)-12s  %(message)s",
+        datefmt="%H:%M:%S",
+        stream=__import__("sys").stderr,
+    )
+    serve(cfg, host=args.host, port=args.port)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -70,6 +70,18 @@ DEFAULTS: dict[str, Any] = {
     "tasker": {
         "task": "NisosAction",
     },
+    "ui": {
+        # Closing the page stops llama-server. This is the whole reason the
+        # heartbeat and the pagehide beacon exist -- see nisos/web.py.
+        "stop_model_on_exit": True,
+        # ...and shuts the web server down too, so nothing lingers.
+        "quit_on_exit": True,
+        # Grace period after the page stops checking in. Comfortably longer
+        # than the 5s heartbeat, or briefly switching apps would kill the
+        # model you are about to use again.
+        "idle_shutdown_seconds": 45,
+        "port": 8765,
+    },
     # Maps what the recogniser heard to the real contact name. See
     # ExecutionContext.resolve_contact for why this exists.
     "contacts": {},

@@ -98,12 +98,36 @@ permissions, and downloading Google's offline voice packs. The installer opens
 the right Settings screen for each and waits, so they're one tap rather than a
 hunt through menus.
 
-### A button, not a command line
+### The app
+
+```bash
+bash ~/nisos/scripts/nisos-ui.sh
+```
+
+Opens a local web UI in your browser. Use **Add to Home Screen** once and
+Android gives it its own icon, launching it fullscreen with no browser chrome —
+it looks and behaves like an app, without anyone having to build and sign an
+APK.
+
+A big Speak button, a typed-command box, and a scrolling history showing what
+it heard, what it did and how long it took.
+
+**Closing it stops the model.** That takes two mechanisms, because neither works
+alone: a `pagehide` beacon handles the normal swipe-away instantly, and a
+heartbeat watchdog catches everything the beacon can't — force-kills, crashes, a
+flat battery. The wake lock is released with it.
+
+⚠️ The UI binds to loopback, but that is *not* isolation on Android: every other
+app on the phone can reach `127.0.0.1`, and this API can send SMS. So a random
+token is generated per launch, handed to the browser in the URL, and required on
+every call.
+
+### A console, when the UI is what's broken
 
 Install [Termux:Widget](https://f-droid.org/packages/com.termux.widget/), then
-long-press the home screen → **Widgets → Termux → "nisos"**.
+long-press the home screen → **Widgets → Termux → "nisos-console"**.
 
-That icon opens the control panel:
+A text control panel — everything one keypress, no UI to go wrong:
 
 ```
   nisos   offline · ελληνικά + english

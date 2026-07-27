@@ -321,9 +321,17 @@ step "Home-screen button"
 # This is the closest thing to a real button that Android allows.
 mkdir -p "$HOME/.shortcuts" "$HOME/.shortcuts/tasks"
 
-# The main one: opens the control panel, so nothing after this needs a
-# command typed on a phone keyboard.
+# The main one: opens the web UI, which is the actual front end. Open it once
+# in the browser, use Add to Home Screen, and it launches fullscreen with its
+# own icon and no browser chrome.
 cat > "$HOME/.shortcuts/nisos" <<EOF
+#!/data/data/com.termux/files/usr/bin/bash
+exec bash "$NISOS_HOME/scripts/nisos-ui.sh"
+EOF
+
+# The text console, kept as the fallback for when the UI itself is the thing
+# that is broken.
+cat > "$HOME/.shortcuts/nisos-console" <<EOF
 #!/data/data/com.termux/files/usr/bin/bash
 exec bash "$NISOS_HOME/scripts/menu.sh"
 EOF
@@ -340,7 +348,7 @@ exec bash "$NISOS_HOME/scripts/nisos.sh" --listen
 EOF
 
 chmod +x "$HOME/.shortcuts/"* 2>/dev/null
-ok "nisos (control panel), nisos-speak, nisos-listen"
+ok "nisos (web UI), nisos-console, nisos-speak, nisos-listen"
 
 # Deliberately NOT installing a boot script. A model server that restarts
 # itself after every reboot, holding a wake lock, is a battery complaint
