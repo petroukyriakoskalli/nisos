@@ -104,8 +104,14 @@ fi
 # --------------------------------------------------------------------------
 for NAME in $WANT; do
   chmod +x "$TMP/$NAME"
-  if ! "$TMP/$NAME" --help >/dev/null 2>&1; then
-    nope "$NAME downloaded but won't run on this device"
+  # Capture the failure instead of swallowing it. "won't run on this device" on
+  # its own is useless -- the loader's message is the whole diagnosis, and it
+  # distinguishes a wrong ABI from a page-size mismatch from a missing library.
+  if ! ERRTEXT="$("$TMP/$NAME" --version 2>&1)"; then
+    printf '     %s said:\n' "$NAME"
+    printf '       %s\n' "$(printf '%s' "$ERRTEXT" | head -3)"
+    printf '       page size on this device: %s\n' "$(getconf PAGESIZE 2>/dev/null || echo unknown)"
+    nope "$NAME downloaded but won't run here (see above)"
   fi
 done
 say "both binaries run here"

@@ -63,8 +63,13 @@ if [ "$NEED_COMPILE" = "1" ]; then
   say "Compiling from source (20-40 minutes)"
   echo "     No usable prebuilt binaries, so this phone builds its own."
 
+  # Refresh the lists first. Without this you get "Unable to locate package
+  # cmake" whenever bootstrap skipped its Packages step -- which it does on any
+  # resumed run, because that step was already marked complete.
+  apt update -y || true
+
   # Not silenced: when this fails it is nearly always a mismatched-ABI Termux
-  # (see the pkg upgrade note in bootstrap.sh), and hiding apt's output turns a
+  # (see the apt note in bootstrap.sh), and hiding apt's output turns a
   # one-line diagnosis into a mystery.
   if ! apt install -y git cmake clang binutils; then
     echo "" >&2

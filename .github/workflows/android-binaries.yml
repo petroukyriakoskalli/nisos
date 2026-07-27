@@ -86,6 +86,8 @@ jobs:
             -DANDROID_ABI="$ANDROID_ABI" \
             -DANDROID_PLATFORM="android-$ANDROID_API" \
             -DANDROID_STL=c++_static \
+            -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON \
+            -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384" \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=OFF \
             -DGGML_NATIVE=OFF \
@@ -115,6 +117,8 @@ jobs:
             -DANDROID_ABI="$ANDROID_ABI" \
             -DANDROID_PLATFORM="android-$ANDROID_API" \
             -DANDROID_STL=c++_static \
+            -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON \
+            -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384" \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=OFF \
             -DGGML_NATIVE=OFF \
