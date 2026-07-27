@@ -107,6 +107,14 @@ draw_header() {
   printf '   %s  disk       %s used  %s· %s GB free%s\n' \
     "$DOT_OK" "$(human_size $(( ${used:-0} * 1024 )))" "$D" "${free:-?}" "$R"
 
+  # Update banner. Reads a cached answer only -- never hits the network here,
+  # so opening the panel is instant and works with the radios off.
+  local avail; avail="$(bash "$NISOS_HOME/scripts/update.sh" status 2>/dev/null)"
+  if [ -n "$avail" ]; then
+    printf '\n   %s▲  nisos %s is available%s  %s— press u to install%s\n' \
+      "$YEL" "$avail" "$R" "$D" "$R"
+  fi
+
   printf '\n'
 }
 
@@ -199,14 +207,29 @@ act_install() {
 }
 
 act_update() {
-  # Pull the latest code. Leaves config.toml and models alone.
-  printf '\n'
-  if [ ! -d "$NISOS_HOME/.git" ]; then
-    printf '  %sNot a git checkout%s -- you installed from a ZIP.\n' "$YEL" "$R"
-    printf '  Download a fresh ZIP and re-run the installer to update.\n'
+  # Check for a new release and offer to install it. Leaves config and models
+  # alone -- they are gitignored and live outside the tracked tree.
+  printf '\n  checking...\n'
+  if bash "$NISOS_HOME/scripts/update.sh" check; then
+    local v; v="$(bash "$NISOS_HOME/scripts/update.sh" status)"
+    printf '\n  %snisos %s is available.%s Install now? [Y/n] ' "$B" "$v" "$R"
+    read -r yn </dev/tty
+    case "$yn" in
+      [nN]*) printf '  left alone\n' ;;
+      *)     printf '\n'; bash "$NISOS_HOME/scripts/update.sh" install ;;
+    esac
   else
-    git -C "$NISOS_HOME" pull --ff-only
+    printf '\n  Already on the latest version (%s).\n' \
+      "$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$NISOS_HOME/nisos/__init__.py")"
   fi
+  pause
+}
+
+act_rollback() {
+  # Undo the last update. The safety net for a bad release on a phone you
+  # cannot conveniently reach.
+  printf '\n'
+  bash "$NISOS_HOME/scripts/update.sh" rollback
   pause
 }
 
@@ -242,7 +265,8 @@ main() {
    ${B}8${R}  View log
 
    ${B}9${R}  Install or repair
-   ${B}0${R}  Update from GitHub
+   ${B}u${R}  Check for updates
+   ${B}r${R}  Roll back last update
    ${B}c${R}  Free up space
    ${B}q${R}  Quit
 EOF
@@ -259,7 +283,8 @@ EOF
       7) act_check ;;
       8) act_log ;;
       9) act_install ;;
-      0) act_update ;;
+      u|U|0) act_update ;;
+      r|R) act_rollback ;;
       c|C) act_cleanup ;;
       q|Q|"") clear; exit 0 ;;
       *) ;;

@@ -29,6 +29,7 @@ NISOS_HOME="${NISOS_HOME:-$HOME/nisos}"
 STATE_DIR="$HOME/.nisos"
 STATE="$STATE_DIR/.bootstrap-state"
 MODELS="$NISOS_HOME/models"
+REPO_URL="${NISOS_REPO:-https://github.com/petroukyriakoskalli/nisos.git}"
 NEED_GB=10
 
 # --------------------------------------------------------------------------
@@ -94,18 +95,31 @@ fi
 ok "${FREE_GB:-?} GB free"
 
 if [ ! -f "$NISOS_HOME/nisos/__main__.py" ]; then
-  # Being run from a download folder rather than ~/nisos. Move it into place.
-  HERE="$(cd "$(dirname "$0")/.." && pwd)"
-  if [ -f "$HERE/nisos/__main__.py" ] && [ "$HERE" != "$NISOS_HOME" ]; then
+  # Three ways to arrive here, in order of likelihood.
+  HERE=""
+  case "${0:-}" in
+    */*) HERE="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)" ;;
+  esac
+
+  if [ -n "$HERE" ] && [ -f "$HERE/nisos/__main__.py" ] && [ "$HERE" != "$NISOS_HOME" ]; then
+    # Run from a ZIP unpacked in Downloads. Move it into place.
     warn "Moving the checkout to $NISOS_HOME"
     mv "$HERE" "$NISOS_HOME" && ok "moved" || { fail "couldn't move it there"; exit 1; }
   else
-    fail "Can't find the nisos source. Run this from inside the checkout."
-    exit 1
+    # Piped straight from curl -- no source anywhere yet. Fetch it.
+    warn "No source found; cloning $REPO_URL"
+    command -v git >/dev/null 2>&1 || pkg install -y git >/dev/null 2>&1
+    if git clone --quiet "$REPO_URL" "$NISOS_HOME"; then
+      ok "cloned to $NISOS_HOME"
+    else
+      fail "Clone failed. Check your connection, or download the ZIP from:"
+      fail "  https://github.com/petroukyriakoskalli/nisos"
+      exit 1
+    fi
   fi
 fi
 cd "$NISOS_HOME" || exit 1
-ok "Source at $NISOS_HOME"
+ok "Source at $NISOS_HOME ($(sed -n 's/^__version__ = "\(.*\)"/v\1/p' nisos/__init__.py 2>/dev/null))"
 
 # ==========================================================================
 step "Packages"
@@ -281,6 +295,35 @@ else
   mark manual
   printf '\n'
   ok "done"
+fi
+
+# ==========================================================================
+step "Update notifications"
+# Off by default and asked for explicitly. This is the only thing in nisos
+# that touches the network, so it should be a decision, not a default.
+if done_already updates; then
+  skip "already chosen"
+else
+  printf '     %snisos can check once a day for a new release and put a\n' "$DIM"
+  printf '     notification on your phone with an Install button.%s\n' "$R"
+  printf '     %sIt is the only feature that uses the network.%s\n' "$DIM" "$R"
+  printf '\n     Enable daily update checks? [y/N] '
+  read -r yn </dev/tty || yn=n
+  case "$yn" in
+    [yY]*)
+      if command -v termux-job-scheduler >/dev/null 2>&1; then
+        termux-job-scheduler --job-id 1001 \
+          --period-ms 86400000 --network any --persisted true \
+          --script "$NISOS_HOME/scripts/update.sh" >/dev/null 2>&1 \
+          && ok "daily check scheduled" \
+          || warn "couldn't schedule -- use 'u' in the control panel instead"
+      else
+        warn "termux-job-scheduler not available -- use 'u' in the control panel"
+      fi
+      ;;
+    *) ok "left off -- check manually with 'u' in the control panel" ;;
+  esac
+  mark updates
 fi
 
 # ==========================================================================

@@ -65,22 +65,17 @@ Two taps and one paste. Everything after that is automatic.
 the Play Store.** The Play build is a dead fork whose packages no longer
 resolve, and it's the most common way this fails on step one.
 
-**2.** Get the code onto the phone. Either clone it:
+**2.** Open Termux and paste one line:
 
 ```bash
-pkg install -y git && git clone https://github.com/petroukyriakoskalli/nisos ~/nisos
+curl -sL https://raw.githubusercontent.com/petroukyriakoskalli/nisos/main/scripts/bootstrap.sh | bash
 ```
 
-…or, if the repo is private and you'd rather not deal with a token, open it in
-the phone's browser and use **Code → Download ZIP**.
+That's the whole install. No account, no token, no ZIP.
 
-**3.** Run the installer:
-
-```bash
-bash ~/nisos/scripts/bootstrap.sh
-```
-
-That's the whole install. It checks you have the disk space, installs the
+Piping a script into your shell deserves a look first — it's a public repo, so
+read it before you run it if you'd rather:
+[scripts/bootstrap.sh](scripts/bootstrap.sh). It checks you have the disk space, installs the
 toolchain, builds llama.cpp and whisper.cpp statically, fetches the Whisper
 weights, finds and downloads a model, writes your config, creates home-screen
 shortcuts, starts the server and self-tests the result.
@@ -114,8 +109,9 @@ That icon opens the control panel:
    3  Type a command           7  Diagnostics
    4  What can it do?          8  View log
 
-   9  Install or repair        c  Free up space
-   0  Update from GitHub       q  Quit
+   9  Install or repair        u  Check for updates
+   c  Free up space            r  Roll back last update
+   q  Quit
 ```
 
 Everything from there is a single keypress — no commands to remember, no
@@ -124,6 +120,24 @@ shortcuts if you want to skip straight to voice.
 
 If you also install [Termux:Boot](https://f-droid.org/packages/com.termux.boot/),
 the model server comes back by itself after a reboot.
+
+### Updates
+
+Opt in during install and nisos checks once a day for a new tagged release,
+then puts a normal Android notification on your phone with an **Install**
+button. Or press **u** in the control panel whenever you feel like it.
+
+Four rules it follows, because updating an offline tool deserves care:
+
+- **Opt-in.** The check is the only thing in nisos that touches the network.
+  Leave it off and nothing ever phones home.
+- **Releases, not `main`.** You get tagged versions, not half-finished work.
+- **Git, not a downloaded script.** Everything goes through git over HTTPS
+  against a known public remote, so nothing runs that isn't already a
+  reviewable commit.
+- **Never silent, always reversible.** Nothing installs without you tapping
+  Install, local edits block an update rather than being overwritten, and the
+  previous version stays put — **r** rolls back.
 
 ### Afterwards
 
