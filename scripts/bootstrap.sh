@@ -136,17 +136,39 @@ step "Packages"
 if done_already packages; then
   skip "toolchain installed"
 else
-  # Deliberately minimal. The 600 MB clang/cmake toolchain is installed only
-  # if install.sh can't get prebuilt binaries and has to compile -- which for
-  # most people never happens.
-  pkg update -y >/dev/null 2>&1
-  if pkg install -y git python termux-api curl unzip >/dev/null 2>&1; then
+  # A FULL UPGRADE FIRST IS NOT OPTIONAL. Termux's repos are rolling, so a
+  # base image that shipped months ago plus freshly-installed packages gives
+  # you mismatched ABIs. The symptom is brutal and unobvious:
+  #
+  #   CANNOT LINK EXECUTABLE "curl": cannot locate symbol
+  #   "SSL_set_quic_tls_transport_params" ... libngtcp2_crypto_ossl.so
+  #
+  # curl then fails, so prebuilt binaries can't be fetched AND the fallback
+  # compile can't install its toolchain. `pkg update` alone does not fix this
+  # -- it only refreshes the package lists.
+  say "Upgrading Termux packages first (required -- skipping this breaks curl)"
+  pkg update -y
+  DEBIAN_FRONTEND=noninteractive pkg upgrade -y -o Dpkg::Options::="--force-confnew" \
+    || warn "upgrade reported problems; continuing"
+
+  # Deliberately minimal. The 600 MB clang/cmake toolchain is installed only if
+  # install.sh can't get prebuilt binaries and has to compile.
+  say "Installing packages"
+  if pkg install -y git python termux-api curl unzip; then
     ok "git python termux-api curl unzip"
-    mark packages
   else
     fail "package install failed -- check your connection and re-run"
     exit 1
   fi
+
+  # Prove curl actually links before anything depends on it.
+  if ! curl --version >/dev/null 2>&1; then
+    fail "curl is installed but won't run -- your Termux packages are mismatched."
+    fail "Fix it with:   pkg upgrade -y      then re-run this script."
+    exit 1
+  fi
+  ok "curl works"
+  mark packages
 fi
 
 # ==========================================================================

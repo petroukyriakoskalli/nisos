@@ -63,8 +63,19 @@ if [ "$NEED_COMPILE" = "1" ]; then
   say "Compiling from source (20-40 minutes)"
   echo "     No usable prebuilt binaries, so this phone builds its own."
 
-  pkg install -y git cmake clang binutils >/dev/null 2>&1 \
-    || { echo "ERROR: couldn't install the toolchain" >&2; exit 1; }
+  # Not silenced: when this fails it is nearly always a mismatched-ABI Termux
+  # (see the pkg upgrade note in bootstrap.sh), and hiding apt's output turns a
+  # one-line diagnosis into a mystery.
+  if ! pkg install -y git cmake clang binutils; then
+    echo "" >&2
+    echo "ERROR: couldn't install the toolchain." >&2
+    echo "       This is almost always a partially-upgraded Termux. Run:" >&2
+    echo "" >&2
+    echo "         pkg upgrade -y" >&2
+    echo "" >&2
+    echo "       then run this script again." >&2
+    exit 1
+  fi
   mkdir -p "$BUILD"
 
   # ---- llama.cpp ---------------------------------------------------------
