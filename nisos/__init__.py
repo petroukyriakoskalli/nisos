@@ -28,5 +28,5 @@ Layout
 See EXTENDING.md for how to add a command.
 """
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 __all__ = ["__version__"]

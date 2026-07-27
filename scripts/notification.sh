@@ -52,11 +52,26 @@ post() {
   # Re-posting with the same --id replaces in place rather than stacking a
   # second one. --alert-once keeps it silent on every update after the first,
   # which matters because a turn re-posts this twice.
-  termux-notification \
+  #
+  # ⚠️ Two hard-won rules are both in force here.
+  #
+  # TIMEOUT: termux-notification talks to the Termux:API app over a pair of
+  # FIFOs and blocks reading the reply. If that app is missing, unpermitted or
+  # wedged, it blocks *forever* -- and because this also runs from a
+  # notification button, a hang there is invisible and unkillable. 15 seconds
+  # is far longer than a working call needs.
+  #
+  # NO 2>/dev/null: this used to swallow stderr, so the first time it hung on
+  # a real phone there was nothing on screen to explain it. Suppressing the
+  # output of a command that talks to Android has now cost this project a
+  # diagnosis three separate times. Don't.
+  local runner=""
+  command -v timeout >/dev/null 2>&1 && runner="timeout 15"
+
+  $runner termux-notification \
     --id "$ID" \
     --title "nisos" \
     --content "${1:-$IDLE}" \
-    --icon mic \
     --priority low \
     --ongoing \
     --alert-once \
@@ -64,8 +79,19 @@ post() {
     --button1       "Speak" \
     --button1-action "bash $NISOS_HOME/scripts/notification.sh turn" \
     --button2       "Stop model" \
-    --button2-action "bash $NISOS_HOME/scripts/notification.sh quiet" \
-    2>/dev/null
+    --button2-action "bash $NISOS_HOME/scripts/notification.sh quiet"
+
+  local rc=$?
+  if [ "$rc" -eq 124 ]; then
+    echo "termux-notification hung and was killed after 15s." >&2
+    echo "  Termux:API is usually the cause. Check, in this order:" >&2
+    echo "    1. the Termux:API *app* is installed (F-Droid), not just the package" >&2
+    echo "    2. pkg install termux-api" >&2
+    echo "    3. Android Settings -> Apps -> Termux:API -> Notifications: allowed" >&2
+    echo "    4. force-stop Termux:API, then try again" >&2
+    return 1
+  fi
+  return "$rc"
 }
 
 # --------------------------------------------------------------------------
@@ -73,7 +99,11 @@ post() {
 # --------------------------------------------------------------------------
 
 cmd_on() {
-  post
+  # Don't install a reboot hook for something that could not be posted once.
+  if ! post; then
+    echo "not turning it on -- fix the above first." >&2
+    return 1
+  fi
   echo "up -- pull down the shade, it has a Speak button."
 
   # Survive a reboot. Termux:Boot is a separate F-Droid app; if it is not

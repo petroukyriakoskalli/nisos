@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.2.4 — 2026-07-27
+
+### Fixed
+
+- **`notification.sh on` could hang forever.** `termux-notification` talks to
+  the Termux:API app over a pair of FIFOs and blocks reading the reply, so if
+  that app is missing, unpermitted or wedged it never returns — and the call
+  was wrapped in `2>/dev/null`, so there was nothing on screen to explain it.
+  That is the third time suppressing the output of a command that talks to
+  Android has cost this project a diagnosis.
+
+  It now runs under a 15-second timeout, prints its errors, and says what to
+  check in order. It also refuses to install the reboot hook for a
+  notification it could not post once — better to fail than to wire a broken
+  thing into boot.
+- **Dropped `--icon mic`.** Cosmetic, and one less argument that can be
+  rejected by a Termux:API version that doesn't know it.
+
 ## v0.2.3 — 2026-07-27
 
 ### Fixed
