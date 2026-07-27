@@ -66,12 +66,12 @@ if [ "$NEED_COMPILE" = "1" ]; then
   # Not silenced: when this fails it is nearly always a mismatched-ABI Termux
   # (see the pkg upgrade note in bootstrap.sh), and hiding apt's output turns a
   # one-line diagnosis into a mystery.
-  if ! pkg install -y git cmake clang binutils; then
+  if ! apt install -y git cmake clang binutils; then
     echo "" >&2
     echo "ERROR: couldn't install the toolchain." >&2
     echo "       This is almost always a partially-upgraded Termux. Run:" >&2
     echo "" >&2
-    echo "         pkg upgrade -y" >&2
+    echo "         apt update && apt full-upgrade -y" >&2
     echo "" >&2
     echo "       then run this script again." >&2
     exit 1

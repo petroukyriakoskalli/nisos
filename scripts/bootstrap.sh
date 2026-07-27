@@ -116,7 +116,7 @@ if [ ! -f "$NISOS_HOME/nisos/__main__.py" ]; then
     # alarming at the very first step, before anything has visibly worked.
     if ! command -v git >/dev/null 2>&1; then
       say "Installing git first (this takes a minute on a fresh Termux)..."
-      pkg install -y git || { fail "couldn't install git"; exit 1; }
+      apt install -y git || { fail "couldn't install git"; exit 1; }
     fi
     say "Cloning $REPO_URL ..."
     if git clone --progress "$REPO_URL" "$NISOS_HOME"; then
@@ -146,15 +146,27 @@ else
   # curl then fails, so prebuilt binaries can't be fetched AND the fallback
   # compile can't install its toolchain. `pkg update` alone does not fix this
   # -- it only refreshes the package lists.
+  # Use apt directly, NOT pkg. The `pkg` wrapper shells out to curl for mirror
+  # selection, so on exactly the broken system this step exists to repair it
+  # fails with the same link error it is trying to fix:
+  #
+  #   $ pkg upgrade
+  #   No mirror or mirror group selected...
+  #   CANNOT LINK EXECUTABLE "curl": cannot locate symbol ...
+  #   Failed to run the 'curl' command.
+  #
+  # apt carries its own HTTP transport and has no such dependency. Termux's own
+  # error message recommends exactly this.
   say "Upgrading Termux packages first (required -- skipping this breaks curl)"
-  pkg update -y
-  DEBIAN_FRONTEND=noninteractive pkg upgrade -y -o Dpkg::Options::="--force-confnew" \
+  apt update -y || warn "apt update reported problems; continuing"
+  DEBIAN_FRONTEND=noninteractive apt full-upgrade -y \
+    -o Dpkg::Options::="--force-confnew" \
     || warn "upgrade reported problems; continuing"
 
   # Deliberately minimal. The 600 MB clang/cmake toolchain is installed only if
   # install.sh can't get prebuilt binaries and has to compile.
   say "Installing packages"
-  if pkg install -y git python termux-api curl unzip; then
+  if apt install -y git python termux-api curl unzip; then
     ok "git python termux-api curl unzip"
   else
     fail "package install failed -- check your connection and re-run"
@@ -163,8 +175,10 @@ else
 
   # Prove curl actually links before anything depends on it.
   if ! curl --version >/dev/null 2>&1; then
-    fail "curl is installed but won't run -- your Termux packages are mismatched."
-    fail "Fix it with:   pkg upgrade -y      then re-run this script."
+    fail "curl is installed but won't link -- your Termux packages are mismatched."
+    fail "Fix it by hand, with apt rather than pkg (pkg needs curl):"
+    fail "    apt update && apt full-upgrade -y"
+    fail "then re-run this script."
     exit 1
   fi
   ok "curl works"
