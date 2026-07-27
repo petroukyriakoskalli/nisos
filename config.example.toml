@@ -1,0 +1,77 @@
+# nisos configuration.
+#
+# Copy this to config.toml (same folder) or ~/.nisos/config.toml and edit.
+# Anything you leave out falls back to the defaults in nisos/config.py, so a
+# half-finished file still boots -- handy when you are editing over SSH.
+
+[general]
+# Starting guess for the fast recogniser. The router corrects this whenever you
+# speak the other language, so it does not need to be kept accurate -- set it
+# to whichever language you use most.
+language = "el"
+
+dry_run  = false
+log_file = "~/.nisos/nisos.log"
+
+
+[audio]
+seconds     = 8                    # hard cap on one recording
+sample_rate = 16000                # what whisper.cpp expects
+path        = "~/.nisos/input.wav" # ALWAYS the same path, so it overwrites
+
+
+[stt]
+# race    -- fire both recognisers, take Android's if the router accepts it.
+#            Fast path stays ~1.0s, and the other language still works.
+# android -- fastest and most accurate, but only in your device locale.
+# whisper -- auto-detects both languages, costs 0.7s on every command.
+strategy = "race"
+
+whisper_bin   = "~/nisos/bin/whisper-cli"
+# MULTILINGUAL weights. Using ggml-small.en here is the single easiest way to
+# build this whole thing and then discover it only speaks English.
+whisper_model = "~/nisos/models/ggml-small-q5_1.bin"
+
+android_timeout = 8.0
+whisper_timeout = 20.0
+
+
+[brain]
+url         = "http://127.0.0.1:8080"
+grammar     = "grammar/action.gbnf"
+timeout     = 40.0
+max_tokens  = 128
+temperature = 0.2
+
+
+[speech]
+# android -- system voices, both languages, zero extra storage. Recommended.
+# piper   -- better English, but Greek is one low-quality voice and +150 MB.
+engine = "android"
+
+[speech.voices]
+en = "en-GB"
+el = "el-GR"
+
+[speech.piper_models]
+en = "~/nisos/voices/en_GB-alba-medium.onnx"
+el = "~/nisos/voices/el_GR-rapunzelina-low.onnx"
+
+
+[tasker]
+# The Tasker task that dispatches actions. It should switch on %par1 and read
+# JSON arguments from %par2. Enable "Allow External Access" in Tasker's
+# preferences or the broadcast is ignored silently.
+task = "NisosAction"
+
+
+[contacts]
+# Code-switching is this program's weakest point. A Greek-locked recogniser
+# renders "Anna" phonetically, so «στείλε μήνυμα στην Άννα» arrives as «αννα»
+# and matches no contact. Map the handful of people you actually text.
+#
+# Keys are lowercase, as the recogniser heard them. Values are the real
+# contact name as stored on the phone.
+"αννα"     = "Anna"
+"γιωργο"   = "Giorgos"
+"μαμα"     = "Mum"

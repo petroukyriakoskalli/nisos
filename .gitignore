@@ -1,0 +1,32 @@
+# Your settings. config.example.toml is the one that's tracked -- your copy
+# holds real contact names.
+config.toml
+
+# Model weights and voices. Multi-gigabyte; fetched by scripts/install.sh.
+models/
+voices/
+bin/
+*.gguf
+*.bin
+*.onnx
+
+# Build trees. scripts/postbuild.sh deletes these on the phone anyway.
+.build/
+
+# Runtime state
+.nisos/
+*.log
+*.wav
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

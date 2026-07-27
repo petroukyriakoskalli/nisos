@@ -1,0 +1,19 @@
+# This repo is authored on Windows but only ever runs on Android/Linux.
+#
+# Without this, git's autocrlf turns scripts/*.sh into CRLF on checkout and
+# Termux fails them with "bad interpreter: /data/data/.../bash^M". Force LF on
+# everything -- there is nothing here that a Windows tool needs to read.
+
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.py    text eol=lf
+*.toml  text eol=lf
+*.gbnf  text eol=lf
+*.md    text eol=lf
+
+# Never let git touch model weights or audio.
+*.gguf  binary
+*.bin   binary
+*.onnx  binary
+*.wav   binary

@@ -1,0 +1,42 @@
+# GBNF grammar constraining llama.cpp to a single valid action object.
+#
+# This is the difference between roughly 70% reliable tool-calling and
+# essentially 100%. Without it a 4B model wraps its JSON in a friendly
+# sentence often enough to be infuriating; with it, malformed output is not
+# unlikely, it is impossible -- llama.cpp will not emit a token the grammar
+# forbids.
+#
+# Keep the `verb` list in step with nisos/actions.py. The test suite checks
+# this for you (tests/test_grammar.py), so a forgotten entry fails locally
+# rather than silently on the phone.
+#
+# Action names are ALWAYS English, in both languages. The model classifies
+# Greek; it never has to write it except inside args.text.
+
+root    ::= "{" ws "\"action\"" ws ":" ws verb ws "," ws "\"args\"" ws ":" ws args ws "}"
+
+verb    ::= "\"torch.on\""
+          | "\"torch.off\""
+          | "\"timer.set\""
+          | "\"battery.read\""
+          | "\"sms.send\""
+          | "\"clipboard.set\""
+          | "\"dnd.on\""
+          | "\"volume.set\""
+          | "\"calendar.next\""
+          | "\"time.read\""
+          | "\"answer\""
+          | "\"unclear\""
+
+args    ::= "{" ws (pair (ws "," ws pair)*)? ws "}"
+pair    ::= string ws ":" ws value
+value   ::= string | number | "true" | "false" | "null"
+
+string  ::= "\"" char* "\""
+char    ::= [^"\\] | "\\" ["\\/bfnrt] | "\\u" hex hex hex hex
+hex     ::= [0-9a-fA-F]
+number  ::= "-"? int frac?
+int     ::= "0" | [1-9] [0-9]*
+frac    ::= "." [0-9]+
+
+ws      ::= [ \t\n]*
