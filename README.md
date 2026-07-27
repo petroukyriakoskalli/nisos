@@ -74,9 +74,14 @@ curl -sL https://raw.githubusercontent.com/petroukyriakoskalli/nisos/main/script
 That's the whole install — full step-by-step in **[INSTALL.md](INSTALL.md)**.
 No account, no token, no ZIP.
 
-It runs unattended: the compile and the 2.5 GB model download happen at the same
-time, and nothing asks you a question until it's finished. Paste it, put the
-phone down, come back to four taps.
+It runs unattended and nothing asks you a question until it's finished. Paste
+it, put the phone down, come back to four taps.
+
+The two native engines come prebuilt — 15 MB, cross-compiled for Android arm64
+by [a workflow](.github/workflows/android-binaries.yml) and attached to each
+release, checksum-verified and test-run before install. No compiler is needed
+and there's nothing to clean up afterwards. If the download isn't usable for any
+reason it falls back to compiling from source, which is the old ~50 minute path.
 
 Piping a script into your shell deserves a look first — it's a public repo, so
 read it before you run it if you'd rather:

@@ -53,8 +53,9 @@ everything, and tests itself.
 down, come back to four taps.
 
 > **Why it's usually fast.** The two native engines are compiled once on
-> GitHub's servers and downloaded ready-made — about a minute instead of half an
-> hour on your phone. If that download isn't possible for any reason (no
+> GitHub's servers and downloaded ready-made — **15 MB, a few seconds**, instead
+> of half an hour of compiling on your phone. They're checksum-verified and
+> test-run before being installed. If that isn't possible for any reason (no
 > release, bad checksum, an unusual device), it quietly compiles from source
 > instead and the install takes ~50 minutes. Either way it works.
 
