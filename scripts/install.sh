@@ -51,22 +51,30 @@ say "Building llama.cpp (static)"
 if [ ! -d "$BUILD/llama.cpp" ]; then
   git clone --depth 1 https://github.com/ggml-org/llama.cpp "$BUILD/llama.cpp"
 fi
+# Only llama-server is ever used -- nisos talks to it over HTTP. Building
+# llama-cli, the tests and the examples as well is minutes of compilation for
+# binaries nothing invokes.
 cmake -S "$BUILD/llama.cpp" -B "$BUILD/llama.cpp/build" \
       -DGGML_NATIVE=ON \
       -DBUILD_SHARED_LIBS=OFF \
-      -DLLAMA_CURL=OFF
-cmake --build "$BUILD/llama.cpp/build" -j"$JOBS" --target llama-server llama-cli
+      -DLLAMA_CURL=OFF \
+      -DLLAMA_BUILD_TESTS=OFF \
+      -DLLAMA_BUILD_EXAMPLES=OFF
+cmake --build "$BUILD/llama.cpp/build" -j"$JOBS" --target llama-server
 cp "$BUILD/llama.cpp/build/bin/llama-server" "$BIN/"
-cp "$BUILD/llama.cpp/build/bin/llama-cli"    "$BIN/"
 
 # --------------------------------------------------------------------------
 say "Building whisper.cpp (static)"
 if [ ! -d "$BUILD/whisper.cpp" ]; then
   git clone --depth 1 https://github.com/ggml-org/whisper.cpp "$BUILD/whisper.cpp"
 fi
+# Same again: without an explicit target this builds every example whisper.cpp
+# ships -- bench, stream, talk, server, the lot. nisos uses whisper-cli only.
 cmake -S "$BUILD/whisper.cpp" -B "$BUILD/whisper.cpp/build" \
-      -DBUILD_SHARED_LIBS=OFF
-cmake --build "$BUILD/whisper.cpp/build" -j"$JOBS"
+      -DBUILD_SHARED_LIBS=OFF \
+      -DWHISPER_BUILD_TESTS=OFF \
+      -DWHISPER_BUILD_SERVER=OFF
+cmake --build "$BUILD/whisper.cpp/build" -j"$JOBS" --target whisper-cli
 cp "$BUILD/whisper.cpp/build/bin/whisper-cli" "$BIN/"
 
 # --------------------------------------------------------------------------
