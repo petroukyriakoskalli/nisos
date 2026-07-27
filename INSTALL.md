@@ -148,28 +148,37 @@ the model itself.
 
 ---
 
-## Optional · a button that takes one turn
+## Optional · a one-tap way in
 
-The fastest nisos gets is not opening anything at all — press something, speak,
-hear the answer. Set up the Termux side once:
+The fastest nisos gets is not opening anything at all — tap something, speak,
+hear the answer. **Start here**, because it needs nothing installed:
 
 ```bash
-bash ~/nisos/scripts/tasker-setup.sh
+bash ~/nisos/scripts/notification.sh on
 ```
 
-Then pick a trigger. Full recipes are in [tasker/README.md](tasker/README.md);
-the trade-off between them is the only thing worth knowing up front:
+A permanent notification with a **Speak** button, tappable from the lock
+screen. No Tasker, no hardware, no battery cost. Add
+[Termux:Boot](https://f-droid.org/packages/com.termux.boot/) and it survives a
+reboot.
+
+If you want a physical trigger as well, run `bash ~/nisos/scripts/tasker-setup.sh`
+and pick one. Full recipes are in [tasker/README.md](tasker/README.md); the
+trade-off is the only thing worth knowing up front:
 
 | Trigger | Works with the screen off? | Needs |
 |---|---|---|
-| Side key, double press | **Yes** — the system handles it | Samsung, nothing else |
+| **Notification Speak button** | **Yes** | nothing |
+| Side key, double press | Yes — the system handles it | Samsung, nothing else |
 | Back-tap (double) | Yes | Good Lock → RegiStar |
 | Volume long-press | No | Tasker |
 | Volume up ×3 | No | Tasker, and it moves the volume as it counts |
 
-> ⚠️ **Volume keys cannot wake it from a locked phone.** Android routes them to
-> the audio system and Tasker never sees them. No recipe changes that — if you
-> want it working from your pocket, it has to be the side key or the back-tap.
+> ⚠️ **Volume keys cannot wake it from a locked phone.** Android delivers input
+> to the system UI, the media session, and system-assigned gestures — and to
+> nothing else. An app never sees the press, so no Tasker profile can fix it.
+> The notification shade *is* system UI, which is why the first option works
+> and the last two don't.
 
 > ⚠️ **The S Pen can't do this.** Samsung removed Bluetooth from the S Pen with
 > the S25 generation, so Air Actions are gone.

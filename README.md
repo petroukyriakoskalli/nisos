@@ -122,6 +122,31 @@ app on the phone can reach `127.0.0.1`, and this API can send SMS. So a random
 token is generated per launch, handed to the browser in the URL, and required on
 every call.
 
+### A Speak button that is always there
+
+```bash
+bash ~/nisos/scripts/notification.sh on
+```
+
+Puts a permanent notification in the shade with a **Speak** button on it. Wake
+the screen, pull down, tap, talk. Nothing to install, nothing running, no
+battery cost — and it works from the lock screen.
+
+That last part is the whole reason it exists. On a locked phone Android
+delivers input to three places only: the system UI, the media session, and
+gestures the system itself is assigned to. An app never sees a volume-key
+combo, so no amount of Tasker configuration makes "volume up ×3" work from
+your pocket — the press does not arrive. **The notification shade is system
+UI**, so a button there does.
+
+It doubles as a one-line status display: the content line becomes whatever
+nisos last said, so a glance at the shade confirms it heard you correctly.
+Tapping the notification body opens the web UI; the second button stops the
+model and gives back 2.5 GB.
+
+Add [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) once and it
+comes back after a reboot — `notification.sh on` writes the hook for you.
+
 ### A console, when the UI is what's broken
 
 Install [Termux:Widget](https://f-droid.org/packages/com.termux.widget/), then

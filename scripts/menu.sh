@@ -52,6 +52,14 @@ model_file() {
   find "$MODELS" -name '*.gguf' -size +100M 2>/dev/null | head -1
 }
 
+notification_state() {
+  # "on" / "off" for the menu line. Checks the reboot hook directly rather
+  # than shelling out to notification.sh -- this runs on every redraw, and
+  # spawning a shell per keypress is felt on a phone. Keep the path in step
+  # with BOOT_SCRIPT there.
+  [ -f "$HOME/.termux/boot/20-nisos-notification.sh" ] && echo "on" || echo "off"
+}
+
 human_size() {
   # Render a byte count as GB/MB, for the status board.
   local bytes="${1:-0}"
@@ -185,6 +193,18 @@ act_check() {
   pause
 }
 
+act_notification() {
+  # Toggle the permanent notification -- the one trigger that works from the
+  # lock screen, because the shade is system UI and a volume key is not.
+  printf '\n'
+  if [ "$(bash "$NISOS_HOME/scripts/notification.sh" status)" = "on" ]; then
+    bash "$NISOS_HOME/scripts/notification.sh" off
+  else
+    bash "$NISOS_HOME/scripts/notification.sh" on
+  fi
+  pause
+}
+
 act_log() {
   # Show the tail of the log. Where you look when something misbehaves.
   printf '\n'
@@ -263,6 +283,7 @@ main() {
    ${B}6${R}  Stop the model
    ${B}7${R}  Diagnostics
    ${B}8${R}  View log
+   ${B}n${R}  Speak button in the shade    ${D}$(notification_state)${R}
 
    ${B}9${R}  Install or repair
    ${B}u${R}  Check for updates
@@ -282,6 +303,7 @@ EOF
       6) act_stop ;;
       7) act_check ;;
       8) act_log ;;
+      n|N) act_notification ;;
       9) act_install ;;
       u|U|0) act_update ;;
       r|R) act_rollback ;;
