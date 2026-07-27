@@ -50,6 +50,7 @@ ok()    { printf '     %s✓%s %s\n' "$OK" "$R" "$*"; }
 skip()  { printf '     %s·%s %s %s(already done)%s\n' "$DIM" "$R" "$*" "$DIM" "$R"; }
 warn()  { printf '     %s!%s %s\n' "$WARN" "$R" "$*"; }
 fail()  { printf '     %s✗%s %s\n' "$ERR" "$R" "$*"; }
+say()   { printf '     %s…%s %s\n' "$DIM" "$R" "$*"; }
 ask()   { printf '\n     %s%s%s\n     %sPress Enter when done, or s to skip: %s' "$B" "$1" "$R" "$DIM" "$R"; read -r REPLY </dev/tty || REPLY=s; }
 
 # --------------------------------------------------------------------------
@@ -109,9 +110,16 @@ if [ ! -f "$NISOS_HOME/nisos/__main__.py" ]; then
     mv "$HERE" "$NISOS_HOME" && ok "moved" || { fail "couldn't move it there"; exit 1; }
   else
     # Piped straight from curl -- no source anywhere yet. Fetch it.
-    warn "No source found; cloning $REPO_URL"
-    command -v git >/dev/null 2>&1 || pkg install -y git >/dev/null 2>&1
-    if git clone --quiet "$REPO_URL" "$NISOS_HOME"; then
+    say "No source yet (normal when run via curl). Fetching it."
+    # Do NOT silence these. On a fresh Termux, installing git takes a minute or
+    # two, and a suppressed install looks exactly like a hang -- which is
+    # alarming at the very first step, before anything has visibly worked.
+    if ! command -v git >/dev/null 2>&1; then
+      say "Installing git first (this takes a minute on a fresh Termux)..."
+      pkg install -y git || { fail "couldn't install git"; exit 1; }
+    fi
+    say "Cloning $REPO_URL ..."
+    if git clone --progress "$REPO_URL" "$NISOS_HOME"; then
       ok "cloned to $NISOS_HOME"
     else
       fail "Clone failed. Check your connection, or download the ZIP from:"
