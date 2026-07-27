@@ -128,9 +128,12 @@ step "Packages"
 if done_already packages; then
   skip "toolchain installed"
 else
+  # Deliberately minimal. The 600 MB clang/cmake toolchain is installed only
+  # if install.sh can't get prebuilt binaries and has to compile -- which for
+  # most people never happens.
   pkg update -y >/dev/null 2>&1
-  if pkg install -y git cmake clang binutils python termux-api curl unzip >/dev/null 2>&1; then
-    ok "git cmake clang python termux-api curl unzip"
+  if pkg install -y git python termux-api curl unzip >/dev/null 2>&1; then
+    ok "git python termux-api curl unzip"
     mark packages
   else
     fail "package install failed -- check your connection and re-run"
@@ -219,11 +222,11 @@ else
 fi
 
 # ==========================================================================
-step "Building llama.cpp and whisper.cpp"
+step "Speech and language engines"
 if done_already build; then
   skip "binaries present"
 else
-  warn "The long one: 20-40 minutes. Nothing will ask you anything until it's done."
+  warn "Downloading prebuilt binaries; compiling only if that isn't possible."
   if bash "$NISOS_HOME/scripts/install.sh"; then
     ok "built and stripped"
     mark build

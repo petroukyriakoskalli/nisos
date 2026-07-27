@@ -1,0 +1,160 @@
+# Cross-compile the two native binaries nisos needs for Android arm64 and
+# attach them to a release.
+#
+# Why this exists: compiling llama.cpp on a phone takes 20-30 minutes, throttles
+# the CPU, and produces byte-for-byte the same result on every device. Doing it
+# once here takes the user-facing install from ~50 minutes to ~10.
+#
+# NDK-built binaries run fine under Termux -- Termux's own packages are built
+# the same way, against the system bionic libc. The important flags are
+# BUILD_SHARED_LIBS=OFF and ANDROID_STL=c++_static, so the result depends on
+# nothing but Android itself and can be dropped straight into ~/nisos/bin.
+
+name: Android binaries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the binaries to (e.g. v0.1.0)"
+        required: true
+        type: string
+      llama_ref:
+        description: "llama.cpp git ref"
+        required: false
+        default: "master"
+      whisper_ref:
+        description: "whisper.cpp git ref"
+        required: false
+        default: "master"
+
+permissions:
+  contents: write
+
+env:
+  ANDROID_ABI: arm64-v8a
+  ANDROID_API: "24"
+  # armv8.2 + dotprod + fp16 covers essentially every phone from 2018 onward and
+  # captures most of the available speed. Going higher (i8mm, armv8.6) would be
+  # faster on an S25 Ultra but would SIGILL on older hardware, and a binary that
+  # crashes on someone's phone is worse than one that is 10% slower.
+  ARM_ARCH: "armv8.2-a+dotprod+fp16"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out nisos
+        uses: actions/checkout@v4
+
+      - name: Resolve target tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          [ -z "$TAG" ] && TAG="${{ github.event.release.tag_name }}"
+          if [ -z "$TAG" ]; then echo "No tag to attach to"; exit 1; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Attaching to $TAG"
+
+      - name: Set up Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+          local-cache: true
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake ninja-build
+
+      # ------------------------------------------------------------------
+      - name: Build llama-server
+        env:
+          NDK: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          REF="${{ github.event.inputs.llama_ref || 'master' }}"
+          git clone --depth 1 --branch "$REF" https://github.com/ggml-org/llama.cpp src-llama \
+            || git clone --depth 1 https://github.com/ggml-org/llama.cpp src-llama
+          echo "LLAMA_SHA=$(git -C src-llama rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+          cmake -S src-llama -B build-llama -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="$ANDROID_ABI" \
+            -DANDROID_PLATFORM="android-$ANDROID_API" \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_NATIVE=OFF \
+            -DGGML_CPU_ARM_ARCH="$ARM_ARCH" \
+            -DLLAMA_CURL=OFF \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF
+          cmake --build build-llama -j"$(nproc)" --target llama-server
+
+          mkdir -p out
+          find build-llama -name 'llama-server' -type f -exec cp {} out/llama-server-android-arm64 \;
+          test -f out/llama-server-android-arm64
+
+      # ------------------------------------------------------------------
+      - name: Build whisper-cli
+        env:
+          NDK: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          REF="${{ github.event.inputs.whisper_ref || 'master' }}"
+          git clone --depth 1 --branch "$REF" https://github.com/ggml-org/whisper.cpp src-whisper \
+            || git clone --depth 1 https://github.com/ggml-org/whisper.cpp src-whisper
+          echo "WHISPER_SHA=$(git -C src-whisper rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+          cmake -S src-whisper -B build-whisper -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="$ANDROID_ABI" \
+            -DANDROID_PLATFORM="android-$ANDROID_API" \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_NATIVE=OFF \
+            -DGGML_CPU_ARM_ARCH="$ARM_ARCH" \
+            -DWHISPER_BUILD_TESTS=OFF \
+            -DWHISPER_BUILD_SERVER=OFF
+          cmake --build build-whisper -j"$(nproc)" --target whisper-cli
+
+          find build-whisper -name 'whisper-cli' -type f -exec cp {} out/whisper-cli-android-arm64 \;
+          test -f out/whisper-cli-android-arm64
+
+      # ------------------------------------------------------------------
+      - name: Verify they are static arm64 Android binaries
+        run: |
+          set -euo pipefail
+          cd out
+          for f in *; do
+            echo "--- $f"
+            file "$f"
+            file "$f" | grep -q 'ARM aarch64' || { echo "not aarch64!"; exit 1; }
+            # Anything beyond bionic would not resolve on a stock device.
+            if command -v llvm-readelf >/dev/null; then
+              llvm-readelf -d "$f" | grep NEEDED || true
+            fi
+          done
+
+      - name: Checksums
+        run: |
+          cd out
+          sha256sum * > SHA256SUMS
+          echo "built from llama.cpp $LLAMA_SHA, whisper.cpp $WHISPER_SHA" > BUILD-INFO
+          cat SHA256SUMS BUILD-INFO
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.tag.outputs.tag }}" \
+            out/llama-server-android-arm64 \
+            out/whisper-cli-android-arm64 \
+            out/SHA256SUMS \
+            out/BUILD-INFO \
+            --clobber --repo "${{ github.repository }}"

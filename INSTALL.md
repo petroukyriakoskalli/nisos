@@ -6,8 +6,9 @@ An offline voice assistant that answers in Greek or English with the radios off.
 
 | | |
 |---|---|
-| Time | ~90 minutes, mostly waiting |
-| Free space needed | 10 GB during install, ~3 GB after |
+| Time | ~10 minutes (or ~50 if it has to compile) |
+| Your attention | ~2 minutes of tapping, all at the end |
+| Free space needed | ~4 GB (10 GB if it compiles) |
 | Android | 7 or newer |
 | Wi-fi | needed once, then never again |
 | Cost | free |
@@ -44,16 +45,23 @@ Open Termux and paste this. It is the entire install.
 curl -sL https://raw.githubusercontent.com/petroukyriakoskalli/nisos/main/scripts/bootstrap.sh | bash
 ```
 
-It checks your free space, installs the toolchain, compiles the speech and
-language engines, downloads a 2.5 GB model, writes your settings, creates a
-home-screen shortcut, starts everything, and tests itself.
+It checks your free space, downloads the speech and language engines, fetches a
+2.5 GB model, writes your settings, creates a home-screen shortcut, starts
+everything, and tests itself.
 
-> **Safe to interrupt.** A 40-minute compile on a phone *will* get killed at some
-> point — screen off, wi-fi drops, Android reclaims memory. Paste the same line
-> again. Every step records itself, so it resumes rather than starting over.
+**Nothing asks you a question until it's finished.** Paste it, put the phone
+down, come back to four taps.
 
-> ⚠️ **Keep the screen on, stay on wi-fi, and plug it in if you can.** The
-> download is 2.5 GB and a long compile at full tilt warms the phone up.
+> **Why it's usually fast.** The two native engines are compiled once on
+> GitHub's servers and downloaded ready-made — about a minute instead of half an
+> hour on your phone. If that download isn't possible for any reason (no
+> release, bad checksum, an unusual device), it quietly compiles from source
+> instead and the install takes ~50 minutes. Either way it works.
+
+> **Safe to interrupt.** Paste the same line again. Every step records itself,
+> so it resumes rather than starting over.
+
+> ⚠️ **Stay on wi-fi.** The model download is 2.5 GB.
 
 ---
 

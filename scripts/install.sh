@@ -1,11 +1,15 @@
 #!/data/data/com.termux/files/usr/bin/bash
 #
-# nisos installer for Termux on Android.
+# Get the two native binaries nisos needs, plus the Whisper weights.
 #
-# Builds llama.cpp and whisper.cpp from source, statically, so that
-# scripts/postbuild.sh can delete the entire build tree afterwards without
-# breaking the binaries. That one flag (-DBUILD_SHARED_LIBS=OFF) is the
-# difference between a 3 GB install and a 7 GB one.
+# Prefers prebuilt binaries from the latest GitHub release -- that is a ~1
+# minute download instead of a 20-30 minute compile, and it means the 600 MB
+# clang/cmake toolchain never has to be installed at all.
+#
+# Falls back to compiling from source whenever the download can't be trusted:
+# no network, no release, checksum mismatch, or a binary that won't exec on this
+# device. The fallback path is exactly what it always was, so this can only be
+# faster, never more fragile.
 #
 # Run once, on wi-fi:  bash scripts/install.sh
 #
@@ -16,8 +20,16 @@ BIN="$NISOS_HOME/bin"
 MODELS="$NISOS_HOME/models"
 BUILD="$NISOS_HOME/.build"
 JOBS="$(nproc 2>/dev/null || echo 4)"
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+
+# Stable, well-known location for the GGML Whisper weights. Fetched directly so
+# that skipping the whisper.cpp checkout doesn't also lose the download script.
+WHISPER_MODEL="ggml-small-q5_1.bin"
+WHISPER_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$WHISPER_MODEL"
 
 say() { printf '\n\033[1;33m==>\033[0m %s\n' "$*"; }
+
+mkdir -p "$BIN" "$MODELS" "$HOME/.nisos"
 
 # --------------------------------------------------------------------------
 say "Checking you have the right Termux"
@@ -34,88 +46,77 @@ if [ ! -d /data/data/com.termux/files/usr ]; then
 fi
 
 # --------------------------------------------------------------------------
-say "Installing the toolchain"
-pkg update -y
-pkg install -y git cmake clang binutils python termux-api
-
-mkdir -p "$BIN" "$MODELS" "$BUILD" "$HOME/.nisos"
-
-# --------------------------------------------------------------------------
 say "Holding a wake lock"
-# Without this, One UI suspends the whole session within minutes and your first
-# command of the morning waits nine seconds for the model to reload.
-termux-wake-lock || true
+# Without this One UI suspends the session mid-install, and later kills the
+# model server so your first command of the morning waits nine seconds.
+termux-wake-lock 2>/dev/null || true
 
 # --------------------------------------------------------------------------
-say "Building llama.cpp (static)"
-if [ ! -d "$BUILD/llama.cpp" ]; then
-  git clone --depth 1 https://github.com/ggml-org/llama.cpp "$BUILD/llama.cpp"
+say "Looking for prebuilt binaries"
+NEED_COMPILE=1
+if bash "$SCRIPTS/fetch-binaries.sh"; then
+  NEED_COMPILE=0
 fi
-# Only llama-server is ever used -- nisos talks to it over HTTP. Building
-# llama-cli, the tests and the examples as well is minutes of compilation for
-# binaries nothing invokes.
-cmake -S "$BUILD/llama.cpp" -B "$BUILD/llama.cpp/build" \
-      -DGGML_NATIVE=ON \
-      -DBUILD_SHARED_LIBS=OFF \
-      -DLLAMA_CURL=OFF \
-      -DLLAMA_BUILD_TESTS=OFF \
-      -DLLAMA_BUILD_EXAMPLES=OFF
-cmake --build "$BUILD/llama.cpp/build" -j"$JOBS" --target llama-server
-cp "$BUILD/llama.cpp/build/bin/llama-server" "$BIN/"
 
 # --------------------------------------------------------------------------
-say "Building whisper.cpp (static)"
-if [ ! -d "$BUILD/whisper.cpp" ]; then
-  git clone --depth 1 https://github.com/ggml-org/whisper.cpp "$BUILD/whisper.cpp"
+if [ "$NEED_COMPILE" = "1" ]; then
+  say "Compiling from source (20-40 minutes)"
+  echo "     No usable prebuilt binaries, so this phone builds its own."
+
+  pkg install -y git cmake clang binutils >/dev/null 2>&1 \
+    || { echo "ERROR: couldn't install the toolchain" >&2; exit 1; }
+  mkdir -p "$BUILD"
+
+  # ---- llama.cpp ---------------------------------------------------------
+  # BUILD_SHARED_LIBS=OFF matters: scripts/postbuild.sh deletes this whole tree
+  # afterwards, and a binary linked against .so files inside it would break.
+  # Only llama-server is ever used -- nisos talks to it over HTTP.
+  say "Building llama-server"
+  [ -d "$BUILD/llama.cpp" ] || \
+    git clone --depth 1 https://github.com/ggml-org/llama.cpp "$BUILD/llama.cpp"
+  cmake -S "$BUILD/llama.cpp" -B "$BUILD/llama.cpp/build" \
+        -DGGML_NATIVE=ON \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DLLAMA_CURL=OFF \
+        -DLLAMA_BUILD_TESTS=OFF \
+        -DLLAMA_BUILD_EXAMPLES=OFF
+  cmake --build "$BUILD/llama.cpp/build" -j"$JOBS" --target llama-server
+  find "$BUILD/llama.cpp/build" -name llama-server -type f -exec cp {} "$BIN/" \;
+
+  # ---- whisper.cpp -------------------------------------------------------
+  # Without an explicit target this builds every example whisper.cpp ships --
+  # bench, stream, talk, the lot. nisos uses whisper-cli only.
+  say "Building whisper-cli"
+  [ -d "$BUILD/whisper.cpp" ] || \
+    git clone --depth 1 https://github.com/ggml-org/whisper.cpp "$BUILD/whisper.cpp"
+  cmake -S "$BUILD/whisper.cpp" -B "$BUILD/whisper.cpp/build" \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DWHISPER_BUILD_TESTS=OFF \
+        -DWHISPER_BUILD_SERVER=OFF
+  cmake --build "$BUILD/whisper.cpp/build" -j"$JOBS" --target whisper-cli
+  find "$BUILD/whisper.cpp/build" -name whisper-cli -type f -exec cp {} "$BIN/" \;
+
+  say "Stripping binaries"
+  strip "$BIN"/* 2>/dev/null || true
 fi
-# Same again: without an explicit target this builds every example whisper.cpp
-# ships -- bench, stream, talk, server, the lot. nisos uses whisper-cli only.
-cmake -S "$BUILD/whisper.cpp" -B "$BUILD/whisper.cpp/build" \
-      -DBUILD_SHARED_LIBS=OFF \
-      -DWHISPER_BUILD_TESTS=OFF \
-      -DWHISPER_BUILD_SERVER=OFF
-cmake --build "$BUILD/whisper.cpp/build" -j"$JOBS" --target whisper-cli
-cp "$BUILD/whisper.cpp/build/bin/whisper-cli" "$BIN/"
 
 # --------------------------------------------------------------------------
-say "Fetching Whisper weights (multilingual)"
+say "Whisper weights (multilingual)"
 # small-q5_1, NOT small.en. Downloading the English-only weights is the easiest
 # way to build this entire project and then discover it doesn't speak Greek.
-( cd "$BUILD/whisper.cpp" && bash ./models/download-ggml-model.sh small-q5_1 )
-cp "$BUILD/whisper.cpp/models/ggml-small-q5_1.bin" "$MODELS/"
-
-# --------------------------------------------------------------------------
-say "Stripping binaries"
-strip "$BIN"/* 2>/dev/null || true
+if [ -f "$MODELS/$WHISPER_MODEL" ]; then
+  echo "     already present"
+else
+  curl -L -C - --retry 3 --progress-bar -o "$MODELS/$WHISPER_MODEL" "$WHISPER_URL" \
+    || { echo "ERROR: whisper weights download failed -- re-run to resume" >&2; exit 1; }
+fi
 
 # --------------------------------------------------------------------------
 say "Done"
-cat <<'EOF'
-
-Still to do, by hand:
-
-  1. Download a model on wi-fi and put it in ~/nisos/models/
-     Recommended: Qwen3-4B-Instruct-Q4_K_M.gguf   (2.5 GB)
-
-  2. Install the Greek offline packs on the phone:
-       Settings -> Google -> All services -> Voice
-         -> Offline speech recognition -> add Ελληνικά
-       Settings -> General management -> Text-to-speech
-         -> install the Greek voice
-     Then test with the phone in AIRPLANE MODE. Without the packs it fails
-     silently by going online, which defeats the entire point.
-
-  3. Exempt Termux from battery optimisation:
-       Settings -> Apps -> Termux -> Battery -> Unrestricted
-
-  4. Start the model:
-       llama-server -m ~/nisos/models/Qwen3-4B-Q4_K_M.gguf \
-                    --port 8080 -t 6 -c 4096 &
-
-  5. Check everything:
-       python -m nisos --check
-
-  6. Reclaim about 4 GB of build scrap:
-       bash scripts/postbuild.sh
-
-EOF
+printf '     llama-server  %s\n' "$([ -x "$BIN/llama-server" ] && echo ok || echo MISSING)"
+printf '     whisper-cli   %s\n' "$([ -x "$BIN/whisper-cli" ] && echo ok || echo MISSING)"
+if [ "$NEED_COMPILE" = "0" ]; then
+  printf '\n     Used prebuilt binaries -- no compiler installed, nothing to clean up.\n'
+else
+  printf '\n     Compiled locally. Run scripts/postbuild.sh afterwards to reclaim ~4 GB.\n'
+fi
