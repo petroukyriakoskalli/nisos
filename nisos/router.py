@@ -63,6 +63,31 @@ def _minutes(language: str) -> ArgBuilder:
     return build
 
 
+# Greek names almost always arrive with an article attached -- «θυμήσου ότι
+# **η** Μαριλένα είναι…» -- and storing "η μαριλενα" means a later lookup for
+# "μαριλενα" finds nothing. Strip a single leading article, in both languages.
+_ARTICLE = re.compile(
+    r"^(?:ο|η|το|οι|τα|τον|την|τη|του|τησ|των|ενασ|μια|ενα|the|a|an)\s+")
+
+
+def strip_article(text: str) -> str:
+    """Drop one leading article from a memory key.
+
+    >>> strip_article("η μαριλενα")
+    'μαριλενα'
+    >>> strip_article("marilena")
+    'marilena'
+    """
+    return _ARTICLE.sub("", text.strip(), count=1).strip()
+
+
+def _key(group: int) -> ArgBuilder:
+    """Argument builder for memory routes that take a single key."""
+    def build(text: str, match: "re.Match[str]") -> dict:
+        return {"key": strip_article(match.group(group))}
+    return build
+
+
 def _level(language: str) -> ArgBuilder:
     """Build an argument builder that extracts a 0-100 level in `language`."""
 
@@ -129,6 +154,17 @@ ROUTES: dict[str, list[Route]] = {
         Route(r"\b(volume|sound)\b", "volume.set", _level("en")),
         Route(r"\b(next |upcoming )?(meeting|appointment|calendar)\b", "calendar.next"),
         Route(r"\bwhat time is it\b|\bthe time\b", "time.read"),
+        # Memory. Specific shapes only -- a broad "what is X" would swallow
+        # every general-knowledge question and answer "nothing stored".
+        Route(r"\bremember (?:that )?(.+?) (?:is|are|'s) (.+)", "memory.remember",
+              lambda t, m: {"key": strip_article(m.group(1)), "value": m.group(2)}),
+        Route(r"\bforget (?:about )?(.+)", "memory.forget",
+              _key(1)),
+        Route(r"\bwhat do you remember\b|\bhow much do you remember\b", "memory.list"),
+        Route(r"\bwhat(?:'s| is) (.+?)(?:'s)? (?:number|phone)\b", "memory.recall",
+              _key(1)),
+        Route(r"\bwhat do you know about (.+)", "memory.recall",
+              _key(1)),
     ],
     "el": [
         # Stems, always. αναψ- covers άναψε / ανάψτε / να ανάψεις.
@@ -139,7 +175,12 @@ ROUTES: dict[str, list[Route]] = {
         Route(r"\b(χρονομετρ|ταιμερ|αντιστροφ)", "timer.set", _minutes("el")),
         Route(r"\bθυμισε μου σε\b", "timer.set", _minutes("el")),
         Route(r"\bμπαταρι", "battery.read"),
-        Route(r"\b(στειλ|γραψ)\w*\b (?:μηνυμα )?(?:στ(?:ον|ην|ο) )?(\w+)", "sms.send",
+        # The article list has to be generous. Spoken Greek drops the final nu
+        # constantly -- «στη Μαριλένα» is at least as common as «στην» -- and
+        # missing one means the ARTICLE gets captured as the recipient's name.
+        # Longest alternatives first, or «στο» shadows «στον».
+        Route(r"\b(στειλ|γραψ)\w*\b\s+(?:μηνυμα\s+)?(?:στ(?:ον|ην|ουσ|ισ|η|ο|α)\s+)?(\w+)",
+              "sms.send",
               lambda t, m: {"to": m.group(2), "body": t[m.end():].strip()}),
         Route(r"\b(αντιγραψ|κοπι)", "clipboard.set",
               lambda t, m: {"text": t[m.end():].strip()}),
@@ -147,8 +188,27 @@ ROUTES: dict[str, list[Route]] = {
         Route(r"\b(ενταση|ηχ)\w*", "volume.set", _level("el")),
         Route(r"\b(ραντεβου|συναντηση|ημερολογ)", "calendar.next"),
         Route(r"\bτι ωρα ειναι\b|\bη ωρα\b", "time.read"),
+        # θυμησου / θυμηθειτε / να θυμασαι all share the θυμ- stem, but so does
+        # «τι θυμασαι», so the list route has to come first.
+        Route(r"\bτι θυμασαι\b|\bποσα θυμασαι\b", "memory.list"),
+        Route(r"\bθυμ\w*\s+(?:οτι\s+)?(.+?)\s+ειναι\s+(.+)", "memory.remember",
+              lambda t, m: {"key": strip_article(m.group(1)), "value": m.group(2)}),
+        Route(r"\b(?:ξεχνα|ξεχασε)\s+(.+)", "memory.forget",
+              _key(1)),
+        Route(r"\bποιο ειναι το (?:τηλεφωνο|νουμερο)\s+(?:τη[σ]?|του|των)?\s*(.+)",
+              "memory.recall", _key(1)),
+        Route(r"\bτι ξερεισ για\s+(.+)", "memory.recall",
+              _key(1)),
     ],
 }
+
+
+# Saying "on WhatsApp" anywhere in a message command switches the channel.
+# Handled as a rewrite rather than duplicate routes, exactly like the torch
+# direction above -- otherwise every phrasing needs writing twice per language.
+# Greek recognisers render the brand phonetically about as often as they get it
+# right, hence the variants.
+_WHATSAPP = re.compile(r"whats\s?app|ουατσαπ|βοτσαπ|γουατσαπ")
 
 
 # The torch patterns above capture a direction word. Rather than duplicating
@@ -214,6 +274,17 @@ def route(raw_text: str, tables: dict | None = None) -> Match | None:
             if action == "torch.on" and _DIRECTION_OFF.search(match.group(0)):
                 action = "torch.off"
 
-            return Match(language=language, action=action,
-                         args=entry.args(text, match))
+            args = entry.args(text, match)
+
+            # Messaging defaults to SMS, because that sends with no taps at
+            # all. Saying "on WhatsApp" switches channel; the brand name is
+            # then stripped out so it doesn't end up inside the message.
+            if action == "sms.send" and _WHATSAPP.search(text):
+                action = "whatsapp.send"
+                if args.get("body"):
+                    args["body"] = _WHATSAPP.sub("", args["body"])
+                    args["body"] = re.sub(r"\s+(on|στο|με)\s*$", "", args["body"].strip())
+                    args["body"] = re.sub(r"\s{2,}", " ", args["body"]).strip(" ,")
+
+            return Match(language=language, action=action, args=args)
     return None

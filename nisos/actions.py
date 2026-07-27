@@ -122,10 +122,15 @@ class ExecutionContext:
     tasker_task: str = "NisosAction"
     timeout: float = 10.0
     contacts: dict[str, str] = None  # type: ignore[assignment]
+    memory: "object | None" = None
+    country_code: str = ""
 
     def __post_init__(self) -> None:
         if self.contacts is None:
             self.contacts = {}
+        if self.memory is None:
+            from .memory import Memory
+            self.memory = Memory()
 
     def termux(self, *command: str) -> str:
         """Run a termux-api command and return its stdout.
@@ -189,16 +194,41 @@ class ExecutionContext:
 
         Code-switching is this program's weakest point. «στείλε μήνυμα στην
         Anna» spoken to a Greek-locked recogniser comes back as «αννα», which
-        matches no contact. The alias table in your config fixes the handful of
-        people you actually text.
+        matches no contact.
+
+        Checks the static alias table from config first, since that is
+        deliberate configuration, then falls back to the name as heard.
 
         Args:
-            spoken: The name as the recogniser heard it, already normalised.
+            spoken: The name as the recogniser heard it.
 
         Returns:
             The mapped name, or the input unchanged if there is no alias.
         """
         return self.contacts.get(spoken.lower(), spoken)
+
+    def resolve_number(self, spoken: str) -> str | None:
+        """Find a phone number for a spoken name.
+
+        Learned memory wins over the config alias table, because you taught it
+        that number out loud and that is the more recent intent.
+
+        Args:
+            spoken: The name as heard.
+
+        Returns:
+            Digits suitable for wa.me, or None if nobody knows the number.
+        """
+        from .memory import normalise_phone
+        if self.memory is not None:
+            found = self.memory.contact(spoken)          # type: ignore[union-attr]
+            if found:
+                return found
+        # The config table maps name -> name, but people put numbers in it too.
+        alias = self.contacts.get(spoken.lower())
+        if alias:
+            return normalise_phone(alias, self.country_code)
+        return None
 
 
 # --------------------------------------------------------------------------
@@ -322,6 +352,103 @@ def calendar_next(args: dict, ctx: ExecutionContext) -> dict:
 def time_read(args: dict, ctx: ExecutionContext) -> dict:
     """Report the current time. The one action that needs nothing at all."""
     return {"time": time.strftime("%H:%M")}
+
+
+@action("whatsapp.send")
+def whatsapp_send(args: dict, ctx: ExecutionContext) -> dict:
+    """Open WhatsApp with a message already typed, ready for you to send.
+
+    ⚠️ It stops one tap short on purpose. WhatsApp has no API for sending
+    without user confirmation; doing it fully automatically means driving an
+    Accessibility Service to find and press the send button, which breaks
+    every time WhatsApp changes its UI, needs a very large permission, and is
+    against their terms. A prefilled chat is reliable and honest.
+
+    Needs a phone NUMBER, not just a name -- wa.me takes no other input. If
+    nobody knows the number the error says so, which is the natural moment to
+    teach it one.
+    """
+    from urllib.parse import quote
+
+    name = (args.get("to") or "").strip()
+    body = (args.get("body") or "").strip()
+    if not name:
+        raise ActionError("no recipient heard")
+    if not body:
+        raise ActionError("no message heard")
+
+    number = ctx.resolve_number(name)
+    if not number:
+        raise ActionError(f"no number stored for {name}")
+
+    ctx.termux("am", "start", "-a", "android.intent.action.VIEW",
+               "-d", f"https://wa.me/{number}?text={quote(body)}")
+    return {"to": name}
+
+
+@action("memory.remember")
+def memory_remember(args: dict, ctx: ExecutionContext) -> dict:
+    """Store a fact, or a phone number if the value looks like one.
+
+    Phone numbers go to the contacts store rather than the facts store, so
+    ``sms.send`` and ``whatsapp.send`` can find them directly instead of the
+    model having to read them back out of a sentence.
+    """
+    from .memory import normalise_phone
+
+    key = (args.get("key") or "").strip()
+    value = (args.get("value") or "").strip()
+    if not key or not value:
+        raise ActionError("didn't catch what to remember")
+
+    digits = normalise_phone(value, ctx.country_code)
+    # A "number" made mostly of letters isn't one; require the value to be
+    # predominantly digits before treating it as a contact.
+    if digits and sum(c.isdigit() for c in value) >= max(7, len(value) // 2):
+        ctx.memory.remember_contact(key, value, ctx.country_code)  # type: ignore[union-attr]
+        return {"key": key, "value": digits}
+
+    ctx.memory.remember(key, value)  # type: ignore[union-attr]
+    return {"key": key, "value": value}
+
+
+@action("memory.recall")
+def memory_recall(args: dict, ctx: ExecutionContext) -> dict:
+    """Read back a stored fact or number."""
+    key = (args.get("key") or "").strip()
+    if not key:
+        raise ActionError("didn't catch what to recall")
+
+    value = ctx.memory.recall(key)             # type: ignore[union-attr]
+    if value is None:
+        value = ctx.memory.contact(key)        # type: ignore[union-attr]
+    if value is None:
+        raise ActionError(f"nothing stored for {key}")
+    return {"key": key, "value": value}
+
+
+@action("memory.forget")
+def memory_forget(args: dict, ctx: ExecutionContext) -> dict:
+    """Drop a fact or contact."""
+    key = (args.get("key") or "").strip()
+    if not key:
+        raise ActionError("didn't catch what to forget")
+    gone = ctx.memory.forget(key) or ctx.memory.forget_contact(key)  # type: ignore[union-attr]
+    if not gone:
+        raise ActionError(f"nothing stored for {key}")
+    return {"key": key}
+
+
+@action("memory.list")
+def memory_list(args: dict, ctx: ExecutionContext) -> dict:
+    """Say how much it is holding on to. Deliberately a count, not a recital.
+
+    Reading forty facts aloud is useless; the web UI is the place to browse
+    them.
+    """
+    facts = ctx.memory.facts()        # type: ignore[union-attr]
+    contacts = ctx.memory.contacts()  # type: ignore[union-attr]
+    return {"facts": len(facts), "contacts": len(contacts)}
 
 
 @action("answer")

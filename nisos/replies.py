@@ -47,6 +47,28 @@ SAY: dict[str, dict[str, str]] = {
         "en": "Sent to {to}.",
         "el": "Το έστειλα στον/στην {to}.",
     },
+    "whatsapp.send": {
+        # Says "ready" rather than "sent" on purpose -- it stops one tap short,
+        # and claiming otherwise would be a lie you'd only discover later.
+        "en": "WhatsApp is open for {to} — tap send.",
+        "el": "Άνοιξα το WhatsApp για {to} — πάτα αποστολή.",
+    },
+    "memory.remember": {
+        "en": "Noted — {key}.",
+        "el": "Το θυμάμαι — {key}.",
+    },
+    "memory.recall": {
+        "en": "{value}",
+        "el": "{value}",
+    },
+    "memory.forget": {
+        "en": "Forgotten.",
+        "el": "Το ξέχασα.",
+    },
+    "memory.list": {
+        "en": "{facts} things and {contacts} numbers.",
+        "el": "{facts} πράγματα και {contacts} τηλέφωνα.",
+    },
     "clipboard.set": {
         "en": "Copied.",
         "el": "Το αντέγραψα.",

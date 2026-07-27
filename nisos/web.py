@@ -210,11 +210,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
+
+        # Read the body BEFORE deciding anything. Replying to a keep-alive POST
+        # without draining its body leaves unread bytes in the socket, and the
+        # client sees the connection abort rather than the 403 you sent.
+        body = self._body()
+
         if not parsed.path.startswith("/api/"):
             return self._json(404, {"error": "not found"})
         if not self._authorised(query):
             return self._json(403, {"error": "bad token"})
-        self._dispatch(parsed.path[5:], self._body())
+        self._dispatch(parsed.path[5:], body)
 
     def _dispatch(self, name: str, body: dict) -> None:
         """Call ``_api_<name>``, or 404."""

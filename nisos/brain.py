@@ -59,7 +59,8 @@ class Decision:
 LANGUAGE_NAMES = {"el": "Greek", "en": "English"}
 
 
-def build_prompt(text: str, language: str, actions: list[str]) -> str:
+def build_prompt(text: str, language: str, actions: list[str],
+                 memories: dict[str, str] | None = None) -> str:
     """Compose the instruction sent to the model.
 
     Args:
@@ -76,10 +77,20 @@ def build_prompt(text: str, language: str, actions: list[str]) -> str:
     spoken = LANGUAGE_NAMES.get(language, "English")
     catalogue = ", ".join(actions)
 
+    # Only the memories that look relevant to THIS utterance, and only a few.
+    # Dumping the whole store would push a 4B model past the point where it
+    # reasons well -- and Greek costs 2-3x more tokens per word, so it degrades
+    # twice as fast in the language you most need it to work in.
+    known = ""
+    if memories:
+        lines = "\n".join(f"- {k}: {v}" for k, v in memories.items())
+        known = f"Things you have been told:\n{lines}\n"
+
     return (
         "<|im_start|>system\n"
         "You convert a phone user's spoken request into exactly one action.\n"
         f"Available actions: {catalogue}\n"
+        f"{known}"
         "Reply with JSON only: {\"action\": \"<name>\", \"args\": {...}}\n"
         "Action names are always English, never translated.\n"
         "Use \"answer\" with an args.text field to reply conversationally, "
@@ -126,7 +137,8 @@ def available(url: str, timeout: float = 1.0) -> bool:
         return False
 
 
-def think(text: str, language: str, actions: list[str], config) -> Decision:
+def think(text: str, language: str, actions: list[str], config,
+          memories: dict[str, str] | None = None) -> Decision:
     """Ask the model what to do.
 
     Args:
@@ -146,7 +158,7 @@ def think(text: str, language: str, actions: list[str], config) -> Decision:
     """
     url = config.get_path("brain.url", "http://127.0.0.1:8080")
     payload = {
-        "prompt": build_prompt(text, language, actions),
+        "prompt": build_prompt(text, language, actions, memories),
         "n_predict": config.get_path("brain.max_tokens", 128),
         "temperature": config.get_path("brain.temperature", 0.2),
         "stop": ["<|im_end|>"],

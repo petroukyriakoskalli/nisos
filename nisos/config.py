@@ -70,6 +70,12 @@ DEFAULTS: dict[str, Any] = {
     "tasker": {
         "task": "NisosAction",
     },
+    "memory": {
+        # Digits, no "+". Local numbers you teach it get this prefixed, since
+        # wa.me only accepts international format. Empty means never guess.
+        "country_code": "",
+        "path": "~/.nisos/memory.json",
+    },
     "ui": {
         # Closing the page stops llama-server. This is the whole reason the
         # heartbeat and the pagehide beacon exist -- see nisos/web.py.

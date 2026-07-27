@@ -108,9 +108,19 @@ def handle(text: str, config, context=None,
         turn.path = "reasoned"
         turn.language = (language_hint
                          or config.get_path("general.language", "en"))
+        # Surface anything remembered that looks relevant, so "when is
+        # Marilena's birthday" can be answered from what you told it.
+        memories = {}
+        if getattr(ctx, "memory", None) is not None:
+            try:
+                memories = ctx.memory.relevant(text)
+            except Exception:  # noqa: BLE001 -- memory must never block a turn
+                log.exception("couldn't read memory")
+
         try:
             decision = brain.think(text, turn.language,
-                                   actions_module.action_names(), config)
+                                   actions_module.action_names(), config,
+                                   memories=memories)
             turn.timings["model"] = decision.seconds * 1000
             action_name, args = decision.action, decision.args
         except brain.BrainError as exc:
@@ -188,9 +198,12 @@ def build_context(config):
     Kept separate so tests and the CLI can build one without a full config, and
     so there is exactly one place that knows how config maps onto the context.
     """
+    from .memory import Memory
     return actions_module.ExecutionContext(
         dry_run=config.get_path("general.dry_run", False),
         tasker_task=config.get_path("tasker.task", "NisosAction"),
         contacts={k.lower(): v for k, v in
                   (config.get_path("contacts", {}) or {}).items()},
+        memory=Memory(config.expanded("memory.path") or None),
+        country_code=str(config.get_path("memory.country_code", "") or ""),
     )

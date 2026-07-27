@@ -61,7 +61,7 @@ class TestReasonedTurns:
 
         monkeypatch.setattr(
             loop.brain, "think",
-            lambda text, language, actions, config:
+            lambda text, language, actions, config, **kw:
                 Decision("answer", {"text": "Το Τόκιο."}, 1.4),
         )
         turn = loop.handle("ποια είναι η πρωτεύουσα της Ιαπωνίας", cfg,
