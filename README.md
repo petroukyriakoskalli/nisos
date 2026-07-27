@@ -58,28 +58,61 @@ missing header.
 
 ## Install
 
-```bash
-git clone https://github.com/petroukyriakoskalli/nisos ~/nisos
-cd ~/nisos
-bash scripts/install.sh        # toolchain, llama.cpp, whisper.cpp, Piper
-cp config.example.toml config.toml
-```
+Two taps and one paste. Everything after that is automatic.
 
-Download a model on wi-fi and drop it in `~/nisos/models/`. Qwen3 4B at
-`Q4_K_M` is the recommended starting point — 2.5 GB, 22–28 tokens/sec on a
-Snapdragon 8 Elite, and the best tool-calling per gigabyte of anything that
-fits on a phone. Then:
+**1.** Install [Termux](https://f-droid.org/packages/com.termux/) and
+[Termux:API](https://f-droid.org/packages/com.termux.api/) — **from F-Droid, not
+the Play Store.** The Play build is a dead fork whose packages no longer
+resolve, and it's the most common way this fails on step one.
+
+**2.** Get the code onto the phone. Either clone it:
 
 ```bash
-termux-wake-lock                                  # or Android kills the server
-llama-server -m ~/nisos/models/Qwen3-4B-Q4_K_M.gguf \
-             --port 8080 -t 6 -c 4096 &
-python -m nisos --check                           # what's present, what isn't
+pkg install -y git && git clone https://github.com/petroukyriakoskalli/nisos ~/nisos
 ```
 
-Once it's built, run `bash scripts/postbuild.sh` to delete the compiler scrap.
-That takes the installation from about 7 GB down to roughly 3 GB, most of which
-is the model itself.
+…or, if the repo is private and you'd rather not deal with a token, open it in
+the phone's browser and use **Code → Download ZIP**.
+
+**3.** Run the installer:
+
+```bash
+bash ~/nisos/scripts/bootstrap.sh
+```
+
+That's the whole install. It checks you have the disk space, installs the
+toolchain, builds llama.cpp and whisper.cpp statically, fetches the Whisper
+weights, finds and downloads a model, writes your config, creates home-screen
+shortcuts, starts the server and self-tests the result.
+
+It is **resumable** — a 40-minute compile on a phone gets interrupted, so every
+step records itself and re-running picks up exactly where it stopped.
+
+Four things Android will not let a script do — installing APKs, granting
+permissions, and downloading Google's offline voice packs. The installer opens
+the right Settings screen for each and waits, so they're one tap rather than a
+hunt through menus.
+
+### A button, not a command line
+
+```
+Install Termux:Widget from F-Droid
+  → long-press the home screen → Widgets → Termux → "nisos"
+```
+
+That icon is now your assistant. `nisos-listen` and `nisos-check` are there
+too. If you also install Termux:Boot, the model server comes back by itself
+after a reboot.
+
+### Afterwards
+
+```bash
+bash ~/nisos/scripts/postbuild.sh
+```
+
+Deletes the compiler and the build trees, installs a nightly log trim, and
+prints before/after. Takes the install from about 7 GB down to roughly 3 GB,
+most of which is the model itself.
 
 ## Using it
 
