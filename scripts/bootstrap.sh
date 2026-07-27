@@ -187,9 +187,15 @@ fi
 
 # ==========================================================================
 step "Wake lock"
-# Without this One UI suspends the session mid-build, and later kills the
-# model server so your first command of the morning waits nine seconds.
-termux-wake-lock 2>/dev/null && ok "held" || warn "couldn't acquire (harmless during install)"
+# Held ONLY for the duration of the install, so a 40-minute compile doesn't get
+# suspended half-way. It is released again at the end -- see the last step.
+#
+# Holding it permanently is what drains the battery: it stops the CPU entering
+# deep sleep for the entire time the phone is idle, which is most of the day.
+# The only thing it buys you is avoiding a ~10 second model reload, and that is
+# a bad trade.
+termux-wake-lock 2>/dev/null && ok "held for the install" \
+  || warn "couldn't acquire (harmless)"
 
 # ==========================================================================
 step "Storage permission"
@@ -336,17 +342,12 @@ EOF
 chmod +x "$HOME/.shortcuts/"* 2>/dev/null
 ok "nisos (control panel), nisos-speak, nisos-listen"
 
-# Start the server automatically when the phone boots, if Termux:Boot is there.
-mkdir -p "$HOME/.termux/boot"
-cat > "$HOME/.termux/boot/nisos-server" <<EOF
-#!/data/data/com.termux/files/usr/bin/bash
-termux-wake-lock
-MODEL=\$(find "$MODELS" -name '*.gguf' -size +100M | head -1)
-[ -n "\$MODEL" ] && nohup "$NISOS_HOME/bin/llama-server" \\
-  -m "\$MODEL" --port 8080 -t 6 -c 4096 >> "$STATE_DIR/llama.log" 2>&1 &
-EOF
-chmod +x "$HOME/.termux/boot/nisos-server"
-ok "boot script (needs the Termux:Boot app to fire)"
+# Deliberately NOT installing a boot script. A model server that restarts
+# itself after every reboot, holding a wake lock, is a battery complaint
+# waiting to happen -- and scripts/nisos.sh starts it on demand anyway, which
+# costs one slow first command instead of all-day drain.
+rm -f "$HOME/.termux/boot/nisos-server" 2>/dev/null
+ok "no boot auto-start (starts on demand instead)"
 
 # ==========================================================================
 step "Starting the model"
@@ -431,6 +432,14 @@ else
   esac
   mark updates
 fi
+
+# ==========================================================================
+step "Releasing the wake lock"
+# The install is over, so give the CPU permission to sleep again. Holding this
+# is the biggest battery cost in the project and buys only a faster first
+# command; scripts/nisos.sh re-acquires it around each turn and releases it
+# again, which is where it actually belongs.
+termux-wake-unlock 2>/dev/null && ok "released -- the phone can sleep again"   || warn "couldn't release; run termux-wake-unlock by hand"
 
 # ==========================================================================
 cat <<EOF

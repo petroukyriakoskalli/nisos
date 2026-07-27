@@ -22,9 +22,15 @@ cd "$NISOS_HOME" || exit 1
 # --------------------------------------------------------------------------
 # Make sure the model is resident. --prompt-cache is deliberately absent: it
 # writes KV state to disk and grows without limit.
+# Hold the wake lock only around the turn itself, and always give it back --
+# see the trap below. A permanently-held lock is the single biggest battery
+# cost in this project, and it only saves a ~10 second model reload.
+release_lock() { termux-wake-unlock >/dev/null 2>&1 || true; }
+trap release_lock EXIT INT TERM
+termux-wake-lock >/dev/null 2>&1 || true
+
 if ! curl -sf --max-time 1 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
   echo "$(date '+%H:%M:%S')  starting llama-server" >> "$HOME/.nisos/nisos.log"
-  termux-wake-lock
   nohup "$NISOS_HOME/bin/llama-server" \
         -m "$MODEL" --port "$PORT" -t "$THREADS" -c "$CONTEXT" \
         >> "$HOME/.nisos/llama.log" 2>&1 &
