@@ -103,6 +103,14 @@ SAY: dict[str, dict[str, str]] = {
         "en": "Can't do that offline.",
         "el": "Αυτό δεν γίνεται χωρίς σύνδεση.",
     },
+    # Distinct from "unavailable" on purpose. This one is not about the
+    # network at all -- the phrase missed the router and llama-server is not
+    # running to think about it. Actionable, because there is something you
+    # can do: start the model, or say it a way the router knows.
+    "no_model": {
+        "en": "The model isn't running, so I can only do the quick commands.",
+        "el": "Το μοντέλο δεν τρέχει, οπότε κάνω μόνο τις γρήγορες εντολές.",
+    },
     "failed": {
         "en": "That didn't work.",
         "el": "Κάτι πήγε στραβά.",

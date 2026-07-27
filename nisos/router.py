@@ -137,8 +137,14 @@ class Match:
 
 ROUTES: dict[str, list[Route]] = {
     "en": [
-        Route(r"\btorch (on|off)\b", "torch.on"),  # direction fixed up below
-        Route(r"\b(turn |switch )?(on|off) the (torch|light|flashlight)\b", "torch.on"),
+        Route(r"\b(torch|flashlight) (on|off)\b", "torch.on"),  # direction fixed below
+        Route(r"\b(turn |switch )?(on|off) (the )?(torch|light|flashlight)\b", "torch.on"),
+        # "open the light" is how a Greek speaker says this in English, and it
+        # is exactly what got typed the first time this ran on a phone. The
+        # Greek table has had ανοιξ-/κλεισ- from the start and the English
+        # table never mirrored them. Article optional throughout -- nobody
+        # types "the" into a voice box.
+        Route(r"\b(open|close) (the )?(torch|light|flashlight)\b", "torch.on"),
         Route(r"\b(set (a |the )?)?timer\b", "timer.set", _minutes("en")),
         Route(r"\bremind me in\b", "timer.set", _minutes("en")),
         # Deliberately just the noun: "battery", "my battery", "battery level"
@@ -214,7 +220,8 @@ _WHATSAPP = re.compile(r"whats\s?app|ουατσαπ|βοτσαπ|γουατσα�
 # The torch patterns above capture a direction word. Rather than duplicating
 # every torch route, the router rewrites the action name when the match tells
 # it the command was "off". Kept here so the tables stay one line per phrase.
-_DIRECTION_OFF = re.compile(r"\b(off|σβησ|κλεισ)")
+# Only consulted for torch.on, so "close" here cannot affect any other action.
+_DIRECTION_OFF = re.compile(r"\b(off|close|σβησ|κλεισ)")
 
 
 def compile_routes(tables: dict[str, list[Route]] | None = None

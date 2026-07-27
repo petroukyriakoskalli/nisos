@@ -125,8 +125,16 @@ def handle(text: str, config, context=None,
             action_name, args = decision.action, decision.args
         except brain.BrainError as exc:
             log.error("%s", exc)
-            turn.action = "unavailable"
-            turn.spoken = replies.say("unavailable", turn.language)
+            # Two very different failures used to say the same thing. "Can't do
+            # that offline" is right for a phrase that genuinely needs the
+            # network, and actively misleading when the truth is that
+            # llama-server simply is not up -- which is the normal state in app
+            # mode, where the UI deliberately doesn't start it. Saying the
+            # wrong one sends you looking for a network problem on a program
+            # whose whole point is not having one.
+            reachable = brain.available(config.get_path("brain.url"), timeout=1.0)
+            turn.action = "unavailable" if reachable else "no_model"
+            turn.spoken = replies.say(turn.action, turn.language)
             speech.speak(turn.spoken, turn.language, config)
             return turn
 

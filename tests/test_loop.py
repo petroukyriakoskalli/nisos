@@ -69,14 +69,34 @@ class TestReasonedTurns:
         assert turn.path == "reasoned"
         assert turn.spoken == "Το Τόκιο."
 
-    def test_unreachable_model_apologises_in_the_right_language(
-            self, cfg, monkeypatch, silence):
+    @staticmethod
+    def _brain_raises(monkeypatch):
         from nisos.brain import BrainError
 
         def down(*args, **kwargs):
             raise BrainError("llama-server unreachable")
 
         monkeypatch.setattr(loop.brain, "think", down)
+
+    def test_a_stopped_model_says_so_rather_than_blaming_the_network(
+            self, cfg, monkeypatch, silence):
+        """The normal case in app mode, and it used to lie about the reason.
+
+        Saying "can't do that offline" when llama-server merely is not running
+        sends you hunting for a network fault in a program whose entire point
+        is not having one.
+        """
+        self._brain_raises(monkeypatch)
+        monkeypatch.setattr(loop.brain, "available", lambda *a, **k: False)
+        turn = loop.handle("summarise this", cfg, RecordingContext(),
+                           language_hint="el")
+        assert turn.action == "no_model"
+        assert "μοντέλο" in turn.spoken
+
+    def test_a_reachable_model_that_failed_still_apologises_in_greek(
+            self, cfg, monkeypatch, silence):
+        self._brain_raises(monkeypatch)
+        monkeypatch.setattr(loop.brain, "available", lambda *a, **k: True)
         turn = loop.handle("summarise this", cfg, RecordingContext(),
                            language_hint="el")
         assert turn.action == "unavailable"

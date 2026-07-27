@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.5 — 2026-07-27
+
+First fixes found by using it on a phone rather than reading it.
+
+### Fixed
+
+- **"open flashlight" did nothing.** The Greek table has had ανοιξ-/κλεισ-
+  since the beginning; the English table never mirrored them, and it also
+  required the word "the". So the phrasing a Greek speaker actually reaches
+  for in English — *open the light* — missed the router entirely and fell
+  through to a model that wasn't running. Now handled, article optional, and
+  `close` maps to off: `open flashlight`, `flashlight on`, `close the light`
+  and `switch off the torch` all route.
+- **"Can't do that offline" was the wrong excuse.** A phrase that misses the
+  router when llama-server is down is not a network problem — and in app mode
+  the model being down is the *normal* state, because the UI deliberately
+  doesn't start it. It now says the model isn't running and that the quick
+  commands still work, which is both true and actionable.
+
 ## v0.2.4 — 2026-07-27
 
 ### Fixed
