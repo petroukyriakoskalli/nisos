@@ -224,7 +224,15 @@ step "Home-screen button"
 # This is the closest thing to a real button that Android allows.
 mkdir -p "$HOME/.shortcuts" "$HOME/.shortcuts/tasks"
 
+# The main one: opens the control panel, so nothing after this needs a
+# command typed on a phone keyboard.
 cat > "$HOME/.shortcuts/nisos" <<EOF
+#!/data/data/com.termux/files/usr/bin/bash
+exec bash "$NISOS_HOME/scripts/menu.sh"
+EOF
+
+# Straight to a single spoken command -- what you'd bind to a back-tap.
+cat > "$HOME/.shortcuts/nisos-speak" <<EOF
 #!/data/data/com.termux/files/usr/bin/bash
 exec bash "$NISOS_HOME/scripts/nisos.sh"
 EOF
@@ -234,14 +242,8 @@ cat > "$HOME/.shortcuts/nisos-listen" <<EOF
 exec bash "$NISOS_HOME/scripts/nisos.sh" --listen
 EOF
 
-cat > "$HOME/.shortcuts/nisos-check" <<EOF
-#!/data/data/com.termux/files/usr/bin/bash
-cd "$NISOS_HOME" && python -m nisos --check
-echo; read -r -p "Enter to close "
-EOF
-
 chmod +x "$HOME/.shortcuts/"* 2>/dev/null
-ok "nisos, nisos-listen, nisos-check"
+ok "nisos (control panel), nisos-speak, nisos-listen"
 
 # Start the server automatically when the phone boots, if Termux:Boot is there.
 mkdir -p "$HOME/.termux/boot"
@@ -315,15 +317,16 @@ cat <<EOF
 
 ${B}  Done.${R}
 
-  ${B}Try it now${R}
-      cd ~/nisos
-      python -m nisos --text "torch on"      # typed, no microphone
-      python -m nisos                        # speak one command
-      python -m nisos --listen               # stay resident
+  ${B}Open the control panel${R}
+      bash ~/nisos/scripts/menu.sh
 
-  ${B}Put a button on your home screen${R}
+      Everything is a single keypress from there -- speak, listen, start
+      and stop the model, diagnostics, update, cleanup. You should not
+      need to type another command.
+
+  ${B}Make it a home-screen icon${R}
       Install Termux:Widget from F-Droid, then long-press the home screen
-      -> Widgets -> Termux -> pick "nisos". That icon is now your assistant.
+      -> Widgets -> Termux -> pick "nisos". That icon opens the panel.
       https://f-droid.org/packages/com.termux.widget/
 
   ${B}Make it a back-tap${R}

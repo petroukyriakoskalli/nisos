@@ -95,14 +95,35 @@ hunt through menus.
 
 ### A button, not a command line
 
+Install [Termux:Widget](https://f-droid.org/packages/com.termux.widget/), then
+long-press the home screen → **Widgets → Termux → "nisos"**.
+
+That icon opens the control panel:
+
 ```
-Install Termux:Widget from F-Droid
-  → long-press the home screen → Widgets → Termux → "nisos"
+  nisos   offline · ελληνικά + english
+  ─────────────────────────────────────────
+
+   ●  model      ready    Qwen3-4B-Q4_K_M.gguf
+   ●  ears       android + whisper
+   ●  voice      el-GR + en-GB
+   ●  disk       3.1 GB used  · 212 GB free
+
+   1  Speak a command          5  Start / restart the model
+   2  Listen continuously      6  Stop the model
+   3  Type a command           7  Diagnostics
+   4  What can it do?          8  View log
+
+   9  Install or repair        c  Free up space
+   0  Update from GitHub       q  Quit
 ```
 
-That icon is now your assistant. `nisos-listen` and `nisos-check` are there
-too. If you also install Termux:Boot, the model server comes back by itself
-after a reboot.
+Everything from there is a single keypress — no commands to remember, no
+typing on a phone keyboard. `nisos-speak` and `nisos-listen` are separate
+shortcuts if you want to skip straight to voice.
+
+If you also install [Termux:Boot](https://f-droid.org/packages/com.termux.boot/),
+the model server comes back by itself after a reboot.
 
 ### Afterwards
 
