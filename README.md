@@ -49,7 +49,7 @@ so the fast path has no model involvement at all.
 | Python 3.11+ | `pkg install python` | Uses `tomllib`, so 3.11 is the floor |
 | llama.cpp | Built locally | `llama-server` on `localhost:8080` |
 | whisper.cpp | Built locally | **Multilingual** weights, not `.en` |
-| Tasker | Play Store, ~£3 | Alarms, calendar, SmartThings, the overlay |
+| Tasker | Play Store, ~£3 | **Optional.** Only do-not-disturb, the calendar and button triggers need it — [tasker/](tasker/README.md) |
 | Greek offline packs | Settings → Google → Voice | Recognition *and* text-to-speech |
 
 There are **no pip dependencies**. The whole program runs on the standard

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<TaskerData sr="" dvi="1" tv="6.3.13">
+	<Task sr="task1">
+		<cdate>1753660800000</cdate>
+		<edate>1753660800000</edate>
+		<id>1</id>
+		<nme>NisosAction</nme>
+		<pri>100</pri>
+		<Action sr="act0" ve="7">
+			<code>129</code>
+			<Str sr="arg0" ve="3">// NisosAction -- the one task nisos broadcasts to.
+//
+// Deliberately a single JavaScriptlet rather than a tree of Tasker actions.
+// Hand-written Tasker XML is easy to get subtly wrong (argument order, the
+// numeric codes behind an If condition), and a task that imports cleanly but
+// branches wrongly is worse than no task at all. One action means one thing
+// to verify; everything else is plain JavaScript you can read.
+//
+// Contract, set by nisos/actions.py ExecutionContext.tasker():
+//   %par1  action name   e.g. "calendar.next"
+//   %par2  JSON payload  e.g. {"until": null}
+//
+// Anything that has to return a value writes it to ANSWER, because an Android
+// broadcast cannot hand one back. That path must be on shared storage --
+// Termux's home is private app data and Tasker cannot write into it.
+
+var ANSWER = "/sdcard/nisos/calendar.json";
+
+var action = local("par1") || "";
+var payload = {};
+try { payload = JSON.parse(local("par2") || "{}"); } catch (e) { payload = {}; }
+
+function answer(obj) { writeFile(ANSWER, JSON.stringify(obj), false); }
+
+if (action === "ping") {
+	// Used by scripts/tasker-test.sh to prove the broadcast arrives at all.
+	flash("nisos: ping ok");
+	answer({ summary: "ping", minutes: 0 });
+
+} else if (action === "dnd.on") {
+	// Do Not Disturb needs a real Tasker action, so it lives in its own task.
+	performTask("NisosDnd", 10, payload.until || "");
+
+} else if (action === "calendar.next") {
+	// Tasker has no "read calendar" action -- only Calendar Insert. So query
+	// the provider directly. This runs as Tasker, which holds READ_CALENDAR,
+	// which is the whole reason this round trip exists.
+	var now = Date.now();
+	var horizon = now + 7 * 24 * 3600 * 1000;
+	var uri = "content://com.android.calendar/instances/when/" + now + "/" + horizon;
+	var out = "";
+	try {
+		out = shell("content query --uri " + uri +
+		            " --projection title:begin --sort \"begin ASC\"", false, 15);
+	} catch (e) { out = ""; }
+
+	var row = /title=([\s\S]*?), begin=(\d+)/.exec(out || "");
+	if (row) {
+		answer({
+			summary: row[1] || "nothing",
+			minutes: Math.round((parseInt(row[2], 10) - now) / 60000)
+		});
+	} else {
+		answer({ summary: "nothing", minutes: 0 });
+	}
+
+} else {
+	flash("nisos: unknown action " + action);
+	answer({ summary: "nothing", minutes: 0 });
+}
+
+exit();</Str>
+			<Str sr="arg1" ve="3"/>
+			<Int sr="arg2" val="1"/>
+			<Int sr="arg3" val="45"/>
+		</Action>
+	</Task>
+</TaskerData>

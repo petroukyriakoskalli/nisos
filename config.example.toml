@@ -59,10 +59,25 @@ el = "~/nisos/voices/el_GR-rapunzelina-low.onnx"
 
 
 [tasker]
-# The Tasker task that dispatches actions. It should switch on %par1 and read
-# JSON arguments from %par2. Enable "Allow External Access" in Tasker's
-# preferences or the broadcast is ignored silently.
+# Optional. Only do-not-disturb and the calendar go through Tasker -- timer and
+# volume are done directly now, so with these two unused Tasker can stay
+# uninstalled. Setup and troubleshooting: tasker/README.md
+#
+# The task switches on %par1 and reads JSON arguments from %par2. Enable
+# "Allow External Access" in Tasker's preferences or the broadcast is ignored
+# silently -- that is the single most common reason none of this works.
 task = "NisosAction"
+
+# Where the task leaves answers a broadcast cannot return.
+#
+# ⚠️ This has to be on shared storage. Termux's home is private app data and
+# Tasker cannot write into it without root, so a path under ~/.nisos looks
+# right and can never work.
+calendar_answer = "/sdcard/nisos/calendar.json"
+
+# How long to wait for that file. Generous, because the broadcast has to wake
+# Tasker before it can even start.
+answer_timeout = 4.0
 
 
 [contacts]

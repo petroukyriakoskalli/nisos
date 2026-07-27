@@ -26,11 +26,20 @@ template. Reach the outside world only through `ctx`:
 | Call | Use for |
 |---|---|
 | `ctx.termux("termux-torch", "on")` | Anything termux-api exposes directly |
+| `ctx.termux("am", "start", "-a", …)` | Anything with a standard Android intent |
 | `ctx.tasker("wifi.off", {...})` | Everything else — every Tasker task you own |
 | `ctx.resolve_contact("αννα")` | Mapping a heard name to a real contact |
 
 Going through `ctx` is what makes the action testable off-phone: the tests
 substitute a context that records commands instead of running them.
+
+**Prefer the first two.** Tasker is the escape hatch, not the default — an
+action that goes through it can only ever be verified on a phone, with the
+right task imported and four separate permissions granted. `timer.set` and
+`volume.set` both started life as Tasker calls and are now a platform intent
+and a `termux-volume` call; they gained unit tests and lost a dependency.
+Reach for `ctx.tasker` when Android genuinely refuses, which in practice means
+a permission Termux cannot hold — see [tasker/README.md](tasker/README.md).
 
 Raise `ActionError` for an expected failure — no duration heard, a Tasker task
 that isn't installed. The assistant then says so politely instead of falling

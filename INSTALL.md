@@ -148,14 +148,31 @@ the model itself.
 
 ---
 
-## Optional · Samsung only
+## Optional · a button that takes one turn
 
-Galaxy Store → **Good Lock** → **RegiStar** → Back-tap (double) → launch a Tasker
-task that runs `~/nisos/scripts/nisos.sh`. Instant, free, no battery cost.
+The fastest nisos gets is not opening anything at all — press something, speak,
+hear the answer. Set up the Termux side once:
+
+```bash
+bash ~/nisos/scripts/tasker-setup.sh
+```
+
+Then pick a trigger. Full recipes are in [tasker/README.md](tasker/README.md);
+the trade-off between them is the only thing worth knowing up front:
+
+| Trigger | Works with the screen off? | Needs |
+|---|---|---|
+| Side key, double press | **Yes** — the system handles it | Samsung, nothing else |
+| Back-tap (double) | Yes | Good Lock → RegiStar |
+| Volume long-press | No | Tasker |
+| Volume up ×3 | No | Tasker, and it moves the volume as it counts |
+
+> ⚠️ **Volume keys cannot wake it from a locked phone.** Android routes them to
+> the audio system and Tasker never sees them. No recipe changes that — if you
+> want it working from your pocket, it has to be the side key or the back-tap.
 
 > ⚠️ **The S Pen can't do this.** Samsung removed Bluetooth from the S Pen with
-> the S25 generation, so Air Actions are gone. Use back-tap, or a cheap Bluetooth
-> button.
+> the S25 generation, so Air Actions are gone.
 
 ---
 
@@ -193,7 +210,8 @@ cd ~/nisos && python -m nisos --check
 | Speaks English at Greek | Greek voice not installed. Settings → Text-to-speech. |
 | Hears nothing | Microphone permission for Termux:API, and check Termux:API is installed. |
 | Only works online | Offline Greek recognition pack missing. Re-check in airplane mode. |
-| Timers do nothing | Expected — timer, do-not-disturb, volume and calendar need a Tasker task that isn't built yet. Torch, battery, SMS, clipboard and time all work without it. |
+| Do-not-disturb or calendar do nothing | Those two need Tasker. Run `bash ~/nisos/scripts/tasker-setup.sh`, then `scripts/tasker-test.sh` — it walks the links and stops at the broken one. See [tasker/README.md](tasker/README.md). Everything else, timer and volume included, works with Tasker uninstalled. |
+| Timer opens the clock app instead of just starting | Some clock apps ignore `SKIP_UI`. Harmless — the countdown still starts. |
 | Slow first command | Model reloading from storage. Hold a wake lock: `termux-wake-lock`. |
 
 > ⚠️ **Expect a few rough edges.** No part of this has run on a real phone yet —
