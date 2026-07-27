@@ -44,4 +44,21 @@ if ! curl -sf --max-time 1 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
 fi
 
 # --------------------------------------------------------------------------
-exec python -m nisos "$@"
+# Keep the logs from quietly eating the phone. llama-server is chatty and
+# nothing else trims llama.log, so do it here -- this is the one thing that
+# runs on every turn. Costs one stat per file.
+for logfile in "$HOME/.nisos/nisos.log" "$HOME/.nisos/llama.log"; do
+  [ -f "$logfile" ] || continue
+  size=$(wc -c < "$logfile" 2>/dev/null || echo 0)
+  if [ "${size:-0}" -gt 5242880 ]; then          # 5 MB
+    tail -c 1048576 "$logfile" > "$logfile.tmp" 2>/dev/null \
+      && mv "$logfile.tmp" "$logfile"
+  fi
+done
+
+# --------------------------------------------------------------------------
+# NOT `exec`. Replacing the shell discards the EXIT trap above, so the wake
+# lock is never given back -- which is exactly the bug the trap was added to
+# fix, and it was silently present until a QA pass caught it. One idle shell
+# for the length of a turn is the price of the lock actually being released.
+python -m nisos "$@"

@@ -43,8 +43,13 @@ say "Emptying the package cache"
 apt clean || true
 
 say "Removing the compiler"
-# ~645 MB. Reinstall with `pkg install clang cmake git` if you ever rebuild.
-pkg uninstall -y clang cmake git 2>/dev/null || true
+# ~615 MB. Reinstall with `pkg install clang cmake` if you ever rebuild.
+#
+# git deliberately stays, though it used to be on this list. scripts/update.sh
+# works by fetching tags and checking one out, so removing git leaves the
+# checkout looking updatable while every update dies at "fetch failed" -- a
+# confusing break to buy the ~30 MB back.
+pkg uninstall -y clang cmake 2>/dev/null || true
 
 # --------------------------------------------------------------------------
 say "Installing the nightly log trim"

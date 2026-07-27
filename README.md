@@ -112,6 +112,21 @@ APK.
 A big Speak button, a typed-command box, and a scrolling history showing what
 it heard, what it did and how long it took.
 
+**Make the icon behave like an app:**
+
+```bash
+bash ~/nisos/scripts/app-mode.sh on
+```
+
+Add to Home Screen makes a *bookmark*, and a bookmark cannot start a server —
+so by default the icon lands on "site can't be reached", because nisos shuts
+down forty-five seconds after you close the page. App mode splits those two
+things apart: the model is still released the moment you close the page, but
+a few MB of idle Python keeps listening, so the icon always opens instantly.
+
+Turn battery optimisation off for Termux or Android will eventually kill the
+background session — that's the one part the script can't do for you.
+
 **Closing it stops the model.** That takes two mechanisms, because neither works
 alone: a `pagehide` beacon handles the normal swipe-away instantly, and a
 heartbeat watchdog catches everything the beacon can't — force-kills, crashes, a

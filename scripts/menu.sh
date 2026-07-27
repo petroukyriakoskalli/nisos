@@ -52,6 +52,13 @@ model_file() {
   find "$MODELS" -name '*.gguf' -size +100M 2>/dev/null | head -1
 }
 
+app_mode_state() {
+  # "on" when the UI server is configured to outlive the page. Grep rather
+  # than shelling out to app-mode.sh: this runs on every redraw.
+  grep -qE '^[[:space:]]*quit_on_exit[[:space:]]*=[[:space:]]*false' \
+    "${NISOS_CONFIG:-$HOME/.nisos/config.toml}" 2>/dev/null && echo "on" || echo "off"
+}
+
 notification_state() {
   # "on" / "off" for the menu line. Checks the reboot hook directly rather
   # than shelling out to notification.sh -- this runs on every redraw, and
@@ -193,6 +200,18 @@ act_check() {
   pause
 }
 
+act_app_mode() {
+  # Whether the server survives closing the page. On = the home-screen icon
+  # works instantly; off = you launch it from here each time.
+  printf '\n'
+  if [ "$(app_mode_state)" = "on" ]; then
+    bash "$NISOS_HOME/scripts/app-mode.sh" off
+  else
+    bash "$NISOS_HOME/scripts/app-mode.sh" on
+  fi
+  pause
+}
+
 act_ui() {
   # Open the web UI. Runs in the foreground on purpose: nisos-ui.sh stays
   # attached so closing this session takes the UI -- and the model -- with it.
@@ -283,6 +302,7 @@ main() {
     draw_header
     cat <<EOF
    ${B}a${R}  Open the app ${D}(web UI)${R}
+   ${B}p${R}  Keep it running for the icon  ${D}$(app_mode_state)${R}
    ${B}1${R}  Speak a command
    ${B}2${R}  Listen continuously
    ${B}3${R}  Type a command
@@ -305,6 +325,7 @@ EOF
 
     case "$choice" in
       a|A) act_ui ;;
+      p|P) act_app_mode ;;
       1) act_speak ;;
       2) act_listen ;;
       3) act_type ;;

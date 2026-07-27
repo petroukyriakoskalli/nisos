@@ -31,7 +31,10 @@ NISOS_HOME="${NISOS_HOME:-$HOME/nisos}"
 ID="nisos"
 BOOT_DIR="$HOME/.termux/boot"
 BOOT_SCRIPT="$BOOT_DIR/20-nisos-notification.sh"
+LOCKDIR="$HOME/.nisos/turn.lock"
 IDLE="ελληνικά + english · offline"
+
+mkdir -p "$HOME/.nisos" 2>/dev/null || true
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -101,8 +104,28 @@ cmd_status() {
 }
 
 cmd_turn() {
-  # The Speak button. Show that it is listening first: a tap with no feedback
-  # for two seconds reads as a tap that did not register.
+  # The Speak button.
+  #
+  # Locked first. A notification button is very easy to double-tap, and two
+  # turns at once means two processes fighting over one microphone -- you get
+  # nonsense from both. The web UI has a lock for the same reason; this path
+  # had none. mkdir is the atomic primitive that needs nothing installed
+  # (flock lives in util-linux, which is not a given in Termux).
+  if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    # Unless it is stale -- a killed turn would otherwise wedge the button
+    # forever, and there is no way to clear it from a notification.
+    if [ -z "$(find "$LOCKDIR" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then
+      post "still listening…"
+      return 0
+    fi
+    rmdir "$LOCKDIR" 2>/dev/null
+    mkdir "$LOCKDIR" 2>/dev/null || return 0
+  fi
+  trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT INT TERM
+
+  # Show that it is listening before recording starts: a tap with no feedback
+  # for two seconds reads as a tap that did not register, and the retry lands
+  # in the middle of the recording.
   post "listening…"
   local spoken
   spoken="$(bash "$NISOS_HOME/scripts/nisos.sh" 2>/dev/null | tail -1)"

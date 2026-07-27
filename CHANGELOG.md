@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.2.2 — 2026-07-27
+
+A QA pass before the first real run on a phone. Three of these were live
+defects; two of them were the kind you don't notice until the battery is flat.
+
+### Fixed
+
+- **The wake lock was never released.** `scripts/nisos.sh` took one, set an
+  `EXIT` trap to give it back, and then ended in `exec python -m nisos` —
+  which replaces the shell, so the trap never ran. Every turn, from every
+  trigger, left the lock held. That is the single largest battery cost in this
+  project and the trap existed specifically to prevent it. The `exec` is gone.
+- **The web UI's token was decorative.** `/` was served with no token check
+  and the live token embedded in the HTML, so any other app on the phone could
+  fetch the page, scrape the token, and then drive an API that sends SMS and
+  reads the clipboard. Loopback is not a boundary on Android — that was in the
+  docstring, and the code did not honour it.
+
+  The page, the manifest and the API are now all behind the token. It is
+  persisted to `~/.nisos/ui-token` (0600, Termux private storage) instead of
+  regenerated per launch, and a valid load hands back an HttpOnly
+  `SameSite=Strict` cookie — so a home-screen shortcut keeps working without
+  carrying a secret in its URL. Only `/icon.svg` is still open; it holds
+  nothing. Nine regression tests cover it.
+- **Double-tapping the notification's Speak button** started two turns fighting
+  over one microphone. Now locked, with a two-minute staleness escape so a
+  killed turn cannot wedge the button.
+- **`llama.log` grew forever.** Nothing trimmed it; the nightly trim only knew
+  about `nisos.log` and had to be wired into a Tasker task by hand. Both are
+  now capped at 5 MB on every turn.
+- **"Free up space" quietly broke self-updating** by uninstalling `git`, which
+  `update.sh` needs to fetch tags. It keeps git now — ~30 MB against an
+  updater that fails at "fetch failed".
+- **The UI failed silently.** A dead server or an expired token reset the
+  button with no message, which looks exactly like "it heard you and had
+  nothing to say". It now says what happened and how to fix it.
+- **Long dictated text** could push a transcript card sideways.
+
+### Added
+
+- **App mode** — `scripts/app-mode.sh on`, or `p` in the console. Add to Home
+  Screen makes a bookmark, and a bookmark cannot start a server, so the icon
+  normally lands on "site can't be reached". App mode keeps the idle server
+  listening while still releasing the model when you close the page, so the
+  icon opens instantly. The watchdog now loops rather than firing once, so
+  every session gets cleaned up, not just the first.
+- **`[ui]` is documented** in `config.example.toml`, which it never was.
+
 ## v0.2.1 — 2026-07-27
 
 ### Added

@@ -58,6 +58,33 @@ en = "~/nisos/voices/en_GB-alba-medium.onnx"
 el = "~/nisos/voices/el_GR-rapunzelina-low.onnx"
 
 
+[ui]
+# The web UI. `scripts/app-mode.sh on` writes these two for you -- edit by
+# hand only if you want something other than the two sensible combinations.
+
+# Stop llama-server when you close the page. Leave this true: it is 2.5 GB,
+# and routed commands ("torch on") never needed it anyway.
+stop_model_on_exit = true
+
+# Shut the *server* down too.
+#
+#   true   session mode (default) -- nothing left running, and you launch it
+#          from Termux each time. The home-screen icon only works while it
+#          happens to be up, which is almost never.
+#   false  app mode -- an idle HTTP server stays listening, so the icon opens
+#          instantly, every time. Costs a few MB of Python and nothing else,
+#          because the model is still released either way.
+#
+# App mode also needs battery optimisation off for Termux, or Android
+# eventually kills the background session and the icon goes dead again.
+quit_on_exit = true
+
+# How long the page can stop checking in before the above happens. Comfortably
+# longer than the 5-second heartbeat, so switching apps for a moment does not
+# throw away a model you are about to use again.
+idle_shutdown_seconds = 45
+
+
 [tasker]
 # Optional. Only do-not-disturb and the calendar go through Tasker -- timer and
 # volume are done directly now, so with these two unused Tasker can stay

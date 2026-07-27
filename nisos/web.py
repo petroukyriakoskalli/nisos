@@ -63,26 +63,69 @@ log = logging.getLogger(__name__)
 UI_DIR = Path(__file__).resolve().parent / "ui"
 
 
+def _load_token(path: str = "~/.nisos/ui-token") -> str:
+    """Read the UI secret, creating it on first use.
+
+    Stored rather than regenerated per launch, for two reasons that pull the
+    same way:
+
+    * **Add to Home Screen has to keep working.** The installed shortcut bakes
+      in whatever ``start_url`` said at install time. A per-launch token makes
+      that shortcut stale the moment the server restarts.
+    * **The page itself is now behind the token** (see :meth:`Handler.do_GET`),
+      so there has to be a value the browser can still present tomorrow.
+
+    Lives in Termux's private app data with 0600 permissions, which is the
+    part that makes it a secret at all -- no other app can read that directory
+    without root.
+
+    Returns:
+        The token, 32 URL-safe characters.
+    """
+    target = Path(path).expanduser()
+    try:
+        existing = target.read_text(encoding="utf-8").strip()
+        if existing:
+            return existing
+    except OSError:
+        pass
+
+    token = secrets.token_urlsafe(24)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(token, encoding="utf-8")
+        target.chmod(0o600)
+    except OSError:
+        log.warning("couldn't persist the UI token to %s -- the home screen "
+                    "shortcut will need reinstalling after a restart", target)
+    return token
+
+
 class AppState:
     """Everything the server keeps between requests.
 
     Attributes:
         config: The loaded :class:`nisos.config.Config`.
-        token: Random per-launch secret required on every API call.
+        token: Secret required on every request, including the page itself.
         history: Recent turns, newest last, capped so it can't grow forever.
         last_seen: Monotonic timestamp of the most recent heartbeat.
         turn_lock: Serialises turns -- two simultaneous recordings would fight
             over the microphone and produce nonsense.
         shutting_down: Set once shutdown has begun, so it only happens once.
+        idle_handled: True once the watchdog has dealt with the current idle
+            spell. Reset by :meth:`touch`, so in app mode -- where the server
+            outlives the page -- the model gets stopped again after the *next*
+            session too, not only the first.
     """
 
     def __init__(self, config):
         self.config = config
-        self.token = secrets.token_urlsafe(24)
+        self.token = _load_token()
         self.history: deque = deque(maxlen=40)
         self.last_seen = time.monotonic()
         self.turn_lock = threading.Lock()
         self.shutting_down = threading.Event()
+        self.idle_handled = False
         self.context = loop.build_context(config)
 
     # -- model process ----------------------------------------------------
@@ -107,8 +150,9 @@ class AppState:
         return killed
 
     def touch(self) -> None:
-        """Record that the page is still open."""
+        """Record that the page is still open, and re-arm the watchdog."""
         self.last_seen = time.monotonic()
+        self.idle_handled = False
 
     def idle_seconds(self) -> float:
         """How long since the page last said anything."""
@@ -116,28 +160,46 @@ class AppState:
 
 
 def _watchdog(state: AppState, server: ThreadingHTTPServer) -> None:
-    """Shut the model down once the page has stopped checking in.
+    """Free what the page was using once it stops checking in.
 
     Runs in a daemon thread. The grace period wants to be comfortably longer
     than the heartbeat interval, or switching apps for a moment would kill the
     model you are about to use again.
+
+    Two modes, chosen by ``ui.quit_on_exit``:
+
+    * **Session mode** (default) -- stop the model *and* the server. Nothing is
+      left running; you launch it again from Termux next time.
+    * **App mode** (``quit_on_exit = false``) -- stop the model, keep serving.
+      The 2.5 GB goes back, an idle HTTP server stays, and the home-screen
+      icon works instantly instead of landing on "site can't be reached".
+
+    App mode is why this loops instead of returning after it fires: the server
+    outlives many page sessions, and each one has to be cleaned up after.
     """
     grace = float(state.config.get_path("ui.idle_shutdown_seconds", 45))
     stop_model = bool(state.config.get_path("ui.stop_model_on_exit", True))
     quit_server = bool(state.config.get_path("ui.quit_on_exit", True))
 
-    while not state.shutting_down.is_set():
+    while True:
         time.sleep(2)
-        if state.idle_seconds() < grace:
+        if state.shutting_down.is_set():
+            return
+        if state.idle_handled or state.idle_seconds() < grace:
             continue
 
-        log.info("no heartbeat for %.0fs -- shutting down", state.idle_seconds())
-        state.shutting_down.set()
+        log.info("no heartbeat for %.0fs -- releasing", state.idle_seconds())
         if stop_model:
             state.stop_model()
+
         if quit_server:
+            state.shutting_down.set()
             threading.Thread(target=server.shutdown, daemon=True).start()
-        return
+            return
+
+        # App mode: stay up, but don't stop the model again until the page
+        # has come back and gone away once more.
+        state.idle_handled = True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -154,6 +216,10 @@ class Handler(BaseHTTPRequestHandler):
         """Quieten the default per-request stderr spam."""
         log.debug(fmt, *args)
 
+    #: Set once a request has proved it knows the token, so the reply can hand
+    #: the browser a cookie and later requests need nothing in the URL.
+    _grant_cookie = False
+
     def _send(self, code: int, body: bytes, ctype: str = "application/json") -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -162,20 +228,51 @@ class Handler(BaseHTTPRequestHandler):
         # This page must never be embedded or reachable from a real website.
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline'")
+        if self._grant_cookie:
+            # HttpOnly so page scripts can't read it back out, SameSite=Strict
+            # so no other origin can make the browser send it. A year, because
+            # the whole point is that the home-screen icon keeps working.
+            self.send_header(
+                "Set-Cookie",
+                f"nisos={self.state.token}; Path=/; Max-Age=31536000; "
+                f"HttpOnly; SameSite=Strict")
         self.end_headers()
         self.wfile.write(body)
 
     def _json(self, code: int, payload: dict) -> None:
         self._send(code, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
 
-    def _authorised(self, query: dict) -> bool:
-        """Check the per-launch token.
+    def _cookie_token(self) -> str:
+        """Pull the token out of the Cookie header, if it is there."""
+        raw = self.headers.get("Cookie") or ""
+        for part in raw.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == "nisos":
+                return value
+        return ""
 
-        Accepted from the ``X-Nisos-Token`` header or a ``t`` query parameter,
-        the latter so the initial page load can carry it in the URL.
+    def _authorised(self, query: dict) -> bool:
+        """Check the token, from any of the three places it can arrive.
+
+        * ``X-Nisos-Token`` header -- what the page's own fetches use.
+        * ``?t=`` -- how the launcher hands it over on the very first load.
+        * a ``nisos`` cookie -- set on the first successful load, so a
+          home-screen shortcut needs nothing in its URL afterwards.
+
+        ⚠️ Every route into this server goes through here, *including the page
+        itself*. That is deliberate and it is the difference between a real
+        secret and a decorative one: `/` used to be served unauthenticated
+        with the live token embedded in it, so any other app on the phone
+        could fetch the page, scrape the token, and then drive an API that
+        sends SMS. Loopback is not a boundary on Android.
         """
-        supplied = self.headers.get("X-Nisos-Token") or (query.get("t", [""])[0])
-        return secrets.compare_digest(supplied or "", self.state.token)
+        supplied = (self.headers.get("X-Nisos-Token")
+                    or query.get("t", [""])[0]
+                    or self._cookie_token())
+        ok = secrets.compare_digest(supplied or "", self.state.token)
+        if ok:
+            self._grant_cookie = True
+        return ok
 
     def _body(self) -> dict:
         """Read and parse a JSON request body, tolerating an empty one."""
@@ -193,19 +290,43 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         path = parsed.path
 
+        # The icon carries no secret and the manifest links to it, so it is the
+        # one thing served without a token. Everything else needs one.
+        if path == "/icon.svg":
+            return self._serve_file("icon.svg", "image/svg+xml")
+
+        if not self._authorised(query):
+            return self._forbidden(path)
+
         if path in ("/", "/index.html"):
             return self._serve_file("index.html", "text/html; charset=utf-8")
         if path == "/manifest.webmanifest":
             return self._serve_manifest()
-        if path == "/icon.svg":
-            return self._serve_file("icon.svg", "image/svg+xml")
-
         if path.startswith("/api/"):
-            if not self._authorised(query):
-                return self._json(403, {"error": "bad token"})
             return self._dispatch(path[5:], {})
 
         self._json(404, {"error": "not found"})
+
+    def _forbidden(self, path: str) -> None:
+        """Refuse, and say something useful if a person is reading it.
+
+        An unauthorised API call gets JSON; an unauthorised page load gets a
+        sentence, because the one way a person hits this is by opening a
+        home-screen shortcut after clearing their browser data.
+        """
+        if path.startswith("/api/"):
+            return self._json(403, {"error": "bad token"})
+        self._send(403, (
+            "<!doctype html><meta charset=utf-8>"
+            "<title>nisos</title>"
+            "<body style=\"font:15px ui-monospace,monospace;background:#080B12;"
+            "color:#E7EEF7;padding:2rem;line-height:1.6\">"
+            "<h1 style=\"font-size:17px\">Not this way in</h1>"
+            "<p style=\"color:#8FA0B6\">This page needs the launch token, and "
+            "this request had none. Start it from Termux &mdash; "
+            "<code>bash ~/nisos/scripts/nisos-ui.sh</code> &mdash; and use "
+            "<b>Add to Home Screen</b> from the page it opens.</p>"
+            "</body>").encode("utf-8"), "text/html; charset=utf-8")
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
@@ -219,7 +340,7 @@ class Handler(BaseHTTPRequestHandler):
         if not parsed.path.startswith("/api/"):
             return self._json(404, {"error": "not found"})
         if not self._authorised(query):
-            return self._json(403, {"error": "bad token"})
+            return self._forbidden(parsed.path)
         self._dispatch(parsed.path[5:], body)
 
     def _dispatch(self, name: str, body: dict) -> None:
@@ -294,15 +415,29 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"stopped": self.state.stop_model()})
 
     def _api_quit(self, body: dict) -> None:
-        """Shut everything down: the model, the wake lock, and this server.
+        """Stop the model, and the server too unless it is meant to stay up.
 
-        Called both by the Quit button and by the page's ``pagehide`` beacon,
-        so swiping the app away really does stop the model.
+        Called by two different things that want two different outcomes:
+
+        * The **Quit button** (``explicit``) always means all of it. You asked.
+        * The page's ``pagehide`` **beacon** just means the page went away. In
+          app mode that must not take the server with it, or the home-screen
+          icon would be dead again by the time you next tapped it.
         """
-        self._json(200, {"ok": True})
-        self.state.shutting_down.set()
+        explicit = bool(body.get("explicit"))
+        keep_serving = (not explicit
+                        and not self.state.config.get_path("ui.quit_on_exit", True))
+
+        self._json(200, {"ok": True, "serving": keep_serving})
+
         if self.state.config.get_path("ui.stop_model_on_exit", True):
             self.state.stop_model()
+
+        if keep_serving:
+            self.state.idle_handled = True   # nothing left for the watchdog
+            return
+
+        self.state.shutting_down.set()
         threading.Thread(target=self.server.shutdown, daemon=True).start()
 
     # -- shared -----------------------------------------------------------

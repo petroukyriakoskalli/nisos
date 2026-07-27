@@ -6,7 +6,10 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#080B12">
-<link rel="manifest" href="/manifest.webmanifest">
+<!-- use-credentials matters: the manifest is behind the token like everything
+     else, and a manifest fetch sends no cookies unless you ask it to. Without
+     this attribute Add to Home Screen quietly stops working. -->
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <title>nisos</title>
 <style>
@@ -76,8 +79,11 @@
     -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px);
     box-shadow:0 1px 0 var(--hi) inset;
   }
-  .turn .heard { color:var(--soft); font-size:14px; }
-  .turn .said  { color:var(--green); font-size:14.5px; margin-top:7px; }
+  /* A dictated URL or a long Greek compound must wrap, not push the card
+     sideways -- one unbroken string would otherwise scroll the whole column. */
+  .turn .heard { color:var(--soft); font-size:14px; overflow-wrap:anywhere; }
+  .turn .said  { color:var(--green); font-size:14.5px; margin-top:7px; overflow-wrap:anywhere; }
+  .turn .said.bad { color:var(--red); }
   .turn .meta {
     margin-top:9px; padding-top:8px; border-top:1px solid var(--rule2);
     display:flex; flex-wrap:wrap; gap:6px; align-items:center;
@@ -238,7 +244,7 @@
 
     if (t.spoken) {
       var said = document.createElement("div");
-      said.className = "said";
+      said.className = "said" + (t.failed ? " bad" : "");
       said.textContent = t.spoken;
       el.appendChild(said);
     }
@@ -267,6 +273,48 @@
     return c;
   }
 
+  // Something went wrong at the transport level rather than in a turn: the
+  // server died, the token expired, a request never came back. Say so.
+  // Silently resetting the button is the worst option -- it looks identical
+  // to "it heard you and had nothing to say", so you stand there repeating
+  // yourself at a page that stopped working minutes ago.
+  function problem(text) {
+    empty.style.display = "none";
+    var el = document.createElement("div");
+    el.className = "turn";
+
+    var said = document.createElement("div");
+    said.className = "said bad";
+    said.textContent = text;
+    el.appendChild(said);
+
+    var meta = document.createElement("div");
+    meta.className = "meta";
+    meta.appendChild(chip("no answer", "bad"));
+    el.appendChild(meta);
+
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // Turn one API reply into either a turn card or a legible complaint.
+  function settle(t) {
+    setBusy(false);
+    if (!t) return problem("Empty reply from the server.");
+    if (t.error === "busy") return problem("Already listening — wait for it to finish.");
+    if (t.error === "bad token") {
+      return problem("This page is no longer signed in. Reopen it from Termux: "
+                     + "bash ~/nisos/scripts/nisos-ui.sh");
+    }
+    if (t.error) return problem("Couldn't do that: " + t.error);
+    addTurn(t);
+  }
+
+  function died() {
+    setBusy(false);
+    problem("The server stopped answering. Start it again from Termux.");
+  }
+
   function setBusy(on, label) {
     busy = on;
     speakBtn.disabled = on;
@@ -284,8 +332,7 @@
   speakBtn.addEventListener("click", function () {
     if (busy) return;
     setBusy(true, "");
-    api("speak", {}).then(function (t) { setBusy(false); addTurn(t); })
-                    .catch(function () { setBusy(false); });
+    api("speak", {}).then(settle).catch(died);
   });
 
   function runTyped() {
@@ -293,8 +340,7 @@
     if (!v || busy) return;
     textIn.value = "";
     setBusy(true, "");
-    api("text", {text: v}).then(function (t) { setBusy(false); addTurn(t); })
-                          .catch(function () { setBusy(false); });
+    api("text", {text: v}).then(settle).catch(died);
   }
   document.getElementById("send").addEventListener("click", runTyped);
   textIn.addEventListener("keydown", function (e) { if (e.key === "Enter") runTyped(); });
@@ -306,8 +352,10 @@
   document.getElementById("quit").addEventListener("click", shutdown);
 
   function shutdown() {
+    // explicit: you pressed Quit, so stop the server too even in app mode.
+    // The pagehide beacon below deliberately does NOT say this.
     alive = false;
-    api("quit", {}).catch(function () {});
+    api("quit", {explicit: true}).catch(function () {});
     gone.classList.add("show");
   }
 
