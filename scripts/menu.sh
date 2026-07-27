@@ -193,6 +193,14 @@ act_check() {
   pause
 }
 
+act_ui() {
+  # Open the web UI. Runs in the foreground on purpose: nisos-ui.sh stays
+  # attached so closing this session takes the UI -- and the model -- with it.
+  printf '\n'
+  bash "$NISOS_HOME/scripts/nisos-ui.sh"
+  pause
+}
+
 act_notification() {
   # Toggle the permanent notification -- the one trigger that works from the
   # lock screen, because the shade is system UI and a volume key is not.
@@ -274,6 +282,7 @@ main() {
   while true; do
     draw_header
     cat <<EOF
+   ${B}a${R}  Open the app ${D}(web UI)${R}
    ${B}1${R}  Speak a command
    ${B}2${R}  Listen continuously
    ${B}3${R}  Type a command
@@ -295,6 +304,7 @@ EOF
     read -r choice </dev/tty || exit 0
 
     case "$choice" in
+      a|A) act_ui ;;
       1) act_speak ;;
       2) act_listen ;;
       3) act_type ;;

@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.2.1 — 2026-07-27
+
+### Added
+
+- **A Speak button that works from the lock screen.**
+  `scripts/notification.sh on` puts a permanent notification in the shade with
+  a **Speak** button on it, and a reboot hook so it comes back.
+
+  This is the answer to "trigger it without unlocking", and the reason no
+  hardware version of that works: on a locked phone Android delivers input to
+  the system UI, the media session, and gestures the system itself is assigned
+  to — and to nothing else. An app never sees a volume-key combo, so no Tasker
+  profile can make one fire from your pocket. The notification shade *is*
+  system UI.
+
+  It doubles as a one-line status display — the content becomes whatever nisos
+  last said. Tapping the body opens the web UI; the second button stops the
+  model and gives back 2.5 GB.
+- **The console can open the app.** `a` in `scripts/menu.sh` launches the web
+  UI, which until now you had to know the script name to reach.
+
 ## v0.2.0 — 2026-07-27
 
 The first release that was installed on a real phone, and it shows: most of
