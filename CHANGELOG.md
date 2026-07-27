@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.6 — 2026-07-27
+
+### Fixed
+
+- **The Speak button could sit amber forever with nothing to show.** A turn's
+  timeouts stack — recording 13s, then the recogniser 8s, then Whisper 20s,
+  then speaking 30s — so a legitimately slow turn can exceed a minute, and a
+  wedged one never returns at all. Both looked identical: bouncing bars and no
+  information.
+
+  The button now counts the seconds out loud after the third one, so "is it
+  dead?" becomes "it has been 14s". And requests are capped at two minutes,
+  after which the page says so and names the usual cause — Termux:API commands
+  block waiting on a reply from the Termux:API app, and when that app is
+  missing or wedged they never return. Same failure that hangs
+  `termux-notification`.
+
 ## v0.2.5 — 2026-07-27
 
 First fixes found by using it on a phone rather than reading it.

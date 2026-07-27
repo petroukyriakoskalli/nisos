@@ -127,6 +127,7 @@
   .wave i:nth-child(2){animation-delay:.1s} .wave i:nth-child(3){animation-delay:.2s}
   .wave i:nth-child(4){animation-delay:.3s} .wave i:nth-child(5){animation-delay:.4s}
   @keyframes bounce { 0%,100%{transform:scaleY(.35)} 50%{transform:scaleY(1.5)} }
+  .elapsed { font-variant-numeric:tabular-nums; letter-spacing:.06em; opacity:.75; }
 
   .row { display:flex; gap:8px; margin-top:10px; }
   .row input {
@@ -221,12 +222,25 @@
   var busy = false;
   var alive = true;
 
-  function api(path, body) {
+  // A turn's timeouts stack -- recording, then the recogniser, then Whisper,
+  // then speaking -- so a legitimately slow one can take over a minute. Past
+  // that, something is wedged, and the page has to say so rather than sit
+  // there: an unbounded wait is indistinguishable from a crash.
+  var TURN_TIMEOUT = 120000;
+
+  function api(path, body, timeoutMs) {
+    var ctrl = ("AbortController" in window) ? new AbortController() : null;
+    var timer = ctrl ? window.setTimeout(function () { ctrl.abort(); },
+                                         timeoutMs || TURN_TIMEOUT) : null;
+    function done(x) { if (timer) window.clearTimeout(timer); return x; }
+
     return fetch("/api/" + path, {
       method: body === undefined ? "GET" : "POST",
       headers: {"Content-Type": "application/json", "X-Nisos-Token": TOKEN},
-      body: body === undefined ? undefined : JSON.stringify(body)
-    }).then(function (r) { return r.json(); });
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: ctrl ? ctrl.signal : undefined
+    }).then(function (r) { done(); return r.json(); },
+            function (e) { done(); throw e; });
   }
 
   // ---- rendering ----------------------------------------------------
@@ -310,28 +324,55 @@
     addTurn(t);
   }
 
-  function died() {
+  function died(err) {
     setBusy(false);
+    if (err && err.name === "AbortError") {
+      // Almost always Termux:API not answering. Its commands block on a reply
+      // from the Termux:API *app*, and when that is missing or wedged they
+      // never return -- the same failure that hangs termux-notification.
+      problem("No reply after two minutes. Termux:API is the usual cause — "
+            + "check it in Termux with:  termux-battery-status");
+      return;
+    }
     problem("The server stopped answering. Start it again from Termux.");
   }
 
-  function setBusy(on, label) {
+  var busyTimer = null;
+  var busyStart = 0;
+
+  var WAVE = '<span class="wave"><i></i><i></i><i></i><i></i><i></i></span>';
+
+  function setBusy(on) {
     busy = on;
     speakBtn.disabled = on;
-    if (on) {
-      speakBtn.classList.add("listening");
-      speakLbl.innerHTML = '<span class="wave"><i></i><i></i><i></i><i></i><i></i></span>';
-      if (label) speakLbl.insertAdjacentText("beforeend", " " + label);
-    } else {
+    if (busyTimer) { window.clearInterval(busyTimer); busyTimer = null; }
+
+    if (!on) {
       speakBtn.classList.remove("listening");
       speakLbl.textContent = "Speak";
+      return;
     }
+
+    // Count the seconds out loud. Bouncing bars say "something is happening";
+    // they do not say whether it has been two seconds or ninety, and that is
+    // the only question you actually have while standing there waiting.
+    speakBtn.classList.add("listening");
+    busyStart = Date.now();
+    paintBusy();
+    busyTimer = window.setInterval(paintBusy, 1000);
+  }
+
+  function paintBusy() {
+    var secs = Math.floor((Date.now() - busyStart) / 1000);
+    // Not before three seconds -- a fast turn shouldn't flash a number.
+    speakLbl.innerHTML = WAVE + (secs >= 3
+      ? ' <span class="elapsed">' + secs + 's</span>' : '');
   }
 
   // ---- actions ------------------------------------------------------
   speakBtn.addEventListener("click", function () {
     if (busy) return;
-    setBusy(true, "");
+    setBusy(true);
     api("speak", {}).then(settle).catch(died);
   });
 
@@ -339,7 +380,7 @@
     var v = textIn.value.trim();
     if (!v || busy) return;
     textIn.value = "";
-    setBusy(true, "");
+    setBusy(true);
     api("text", {text: v}).then(settle).catch(died);
   }
   document.getElementById("send").addEventListener("click", runTyped);
