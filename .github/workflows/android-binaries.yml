@@ -127,6 +127,26 @@ jobs:
           test -f out/whisper-cli-android-arm64
 
       # ------------------------------------------------------------------
+      # The NDK toolchain file leaves debug symbols in even for a Release
+      # build, which took llama-server to 174 MB on the first run. Every user
+      # would download that. llvm-strip takes it to roughly a tenth.
+      - name: Strip debug symbols
+        env:
+          NDK: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          [ -x "$STRIP" ] || STRIP="$(command -v llvm-strip || command -v strip)"
+          echo "using $STRIP"
+          cd out
+          for f in *; do
+            before=$(stat -c%s "$f")
+            "$STRIP" --strip-all "$f" || echo "  (could not strip $f)"
+            after=$(stat -c%s "$f")
+            printf '%-34s %6.1f MB -> %5.1f MB\n' "$f" \
+              "$(echo "$before/1048576" | bc -l)" "$(echo "$after/1048576" | bc -l)"
+          done
+
       - name: Verify they are static arm64 Android binaries
         run: |
           set -euo pipefail
