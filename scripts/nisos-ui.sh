@@ -24,22 +24,35 @@ mkdir -p "$STATE_DIR"
 cd "$NISOS_HOME" || { echo "nisos not found at $NISOS_HOME"; exit 1; }
 
 # --------------------------------------------------------------------------
-# Don't start a second one. If a UI is already listening, just reopen it --
-# but we need its token, which only the running process knows, so it is
-# written to a file at startup.
+# Don't start a second one. If a UI is already listening, just reopen it.
+#
+# Two ways to know the URL, and the second one matters: in app mode the server
+# was started at boot by app-mode.sh rather than by this script, so there is no
+# ui-url to read. The token is persistent now, so the URL can simply be rebuilt
+# from it -- without that fallback, running this while app mode is on gave you
+# "something is already on port 8765" and no way in.
 if curl -sf --max-time 1 "http://127.0.0.1:$PORT/icon.svg" >/dev/null 2>&1; then
-  if [ -f "$STATE_DIR/ui-url" ]; then
+  URL=""
+  [ -f "$STATE_DIR/ui-url" ] && URL="$(head -1 "$STATE_DIR/ui-url" 2>/dev/null)"
+  if [ -z "$URL" ] && [ -s "$STATE_DIR/ui-token" ]; then
+    URL="http://127.0.0.1:$PORT/?t=$(head -1 "$STATE_DIR/ui-token")"
+  fi
+
+  if [ -n "$URL" ]; then
     echo "already running; reopening"
-    termux-open-url "$(cat "$STATE_DIR/ui-url")" 2>/dev/null
+    printf '%s\n' "$URL" > "$STATE_DIR/ui-url"
+    echo "$URL"
+    termux-open-url "$URL" 2>/dev/null || echo "(open that URL yourself)"
     exit 0
   fi
+
   echo "Something is already on port $PORT. Set NISOS_UI_PORT to use another."
   exit 1
 fi
 
 # --------------------------------------------------------------------------
-# Start the server. It prints its URL (with the one-time token) on the first
-# line of stdout; capture that, save it, and open it.
+# Start the server. It prints its URL (with the token) on the first line of
+# stdout; capture that, save it, and open it.
 echo "starting nisos UI..."
 python -m nisos.web --port "$PORT" > "$STATE_DIR/ui.out" 2>>"$STATE_DIR/ui.log" &
 UI_PID=$!

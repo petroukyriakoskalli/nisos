@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.3 — 2026-07-27
+
+### Fixed
+
+- **`nisos-ui.sh` refused to open the UI while app mode was on.** In app mode
+  the server is started at boot by `app-mode.sh`, so there is no `ui-url` file
+  for the launcher to read — it saw the port taken, found nothing to reopen,
+  and said "something is already on port 8765" with no way in. Now that the
+  token is persistent the URL is simply rebuilt from it. This was on the exact
+  path the setup instructions tell you to walk.
+
 ## v0.2.2 — 2026-07-27
 
 A QA pass before the first real run on a phone. Three of these were live
