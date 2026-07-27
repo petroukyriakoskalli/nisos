@@ -58,12 +58,33 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Attaching to $TAG"
 
+      # local-cache is deliberately OFF. With it on, a run restored a cache that
+      # was missing the whole llvm toolchain, and the only symptom was cmake
+      # saying clang "is not a full path to an existing compiler tool" -- a
+      # confusing error a long way from the cause. A fresh download costs about
+      # a minute and cannot half-exist.
       - name: Set up Android NDK
         id: ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27c
-          local-cache: true
+          local-cache: false
+
+      - name: Check the NDK is actually complete
+        env:
+          NDK: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          for t in clang clang++ llvm-strip; do
+            if [ ! -x "$BIN/$t" ]; then
+              echo "::error::NDK is incomplete -- $BIN/$t is missing"
+              ls -la "$BIN" 2>/dev/null | head -20 || echo "(no toolchain dir at all)"
+              exit 1
+            fi
+          done
+          echo "NDK toolchain present at $BIN"
+          "$BIN/clang" --version | head -1
 
       - name: Install build tools
         run: |
