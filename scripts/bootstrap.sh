@@ -4,15 +4,17 @@
 #
 #   bash scripts/bootstrap.sh
 #
-# Does everything that can be automated on Android, in order, and stops with a
-# clear instruction for the handful of things that cannot be:
+# Does everything that can be automated on Android, and defers the handful of
+# things that cannot be -- installing APKs, granting permissions, Google's
+# offline voice packs -- to a single block of taps at the very END.
 #
-#   * installing APKs           -- Android requires a human tap
-#   * granting permissions      -- ditto
-#   * Google's offline voice packs -- lives inside the Google app's own UI
+# That ordering matters more than it looks. An installer that stops to ask a
+# question twenty minutes in is one you have to babysit for an hour. This one
+# does all the slow work unattended, then asks for four taps once it is done,
+# opening the exact Settings screen for each.
 #
-# For those it opens the exact Settings screen for you, so each is one tap
-# rather than a hunt through menus.
+# The 20-40 minute compile and the 2.5 GB model download also run CONCURRENTLY,
+# since they have nothing to do with each other. Roughly 15 minutes saved.
 #
 # RESUMABLE. Every step records itself in ~/.nisos/.bootstrap-state, so if the
 # build gets killed -- Android OOM, screen off, dropped wi-fi -- just run it
@@ -73,7 +75,7 @@ open_settings() {
 
 # ==========================================================================
 printf '\n%s  nisos%s -- offline bilingual voice assistant\n' "$B" "$R"
-printf '  %sThis takes about 90 minutes, mostly waiting on a compile.%s\n' "$DIM" "$R"
+printf '  %s~50 minutes. Walk away -- nothing asks you anything until the end.%s\n' "$DIM" "$R"
 printf '  %sSafe to interrupt and re-run: it resumes where it stopped.%s\n' "$DIM" "$R"
 
 # ==========================================================================
@@ -157,33 +159,15 @@ else
 fi
 
 # ==========================================================================
-step "Building llama.cpp and whisper.cpp"
-if done_already build; then
-  skip "binaries present"
-else
-  warn "This is the long one: 20-40 minutes. Keep the screen on."
-  if bash "$NISOS_HOME/scripts/install.sh"; then
-    ok "built and stripped"
-    mark build
-  else
-    fail "build failed -- scroll up for the error, then re-run this script"
-    exit 1
-  fi
-fi
-
+# The two slow jobs -- a 20-40 minute compile and a 2.5 GB download -- have
+# nothing to do with each other, so they run at the same time. That is roughly
+# 15 minutes off the total for free.
 # ==========================================================================
-step "Language model"
+step "Downloading the model in the background"
 mkdir -p "$MODELS"
 EXISTING="$(find "$MODELS" -name '*.gguf' -size +100M 2>/dev/null | head -1)"
 
-if [ -n "$EXISTING" ]; then
-  skip "found $(basename "$EXISTING")"
-  mark model
-elif [ "${NISOS_SKIP_MODEL:-0}" = "1" ]; then
-  warn "skipped by request -- routed commands will work, reasoned ones won't"
-elif done_already model; then
-  skip "done"
-else
+fetch_model() {
   # Try known-good Hugging Face locations, verifying each with a HEAD request
   # before committing to a 2.5 GB download. Repo names move around, so this
   # degrades to asking rather than failing.
@@ -204,21 +188,67 @@ https://huggingface.co/bartowski/Qwen_Qwen3-4B-GGUF/resolve/main/Qwen_Qwen3-4B-Q
   fi
 
   if [ -z "$URL" ]; then
-    warn "Couldn't find a model automatically."
-    printf '     %sOpen huggingface.co on the phone, search "Qwen3 4B Instruct GGUF",%s\n' "$DIM" "$R"
-    printf '     %scopy the download link for the Q4_K_M file, then re-run:%s\n' "$DIM" "$R"
-    printf '\n       %sNISOS_MODEL_URL="<link>" bash scripts/bootstrap.sh%s\n' "$ACC" "$R"
-  else
-    ok "source: $(echo "$URL" | cut -d/ -f4-5)"
-    warn "Downloading ~2.5 GB. Resumable -- re-run if it drops."
-    if curl -L -C - --retry 3 --progress-bar \
-         -o "$MODELS/$(basename "$URL")" "$URL"; then
-      ok "$(basename "$URL")"
-      mark model
-    else
-      fail "download failed -- re-run to resume from where it stopped"
-    fi
+    echo "NOMODEL" > "$STATE_DIR/.model-result"
+    return 1
   fi
+
+  # Quiet (-sS): this runs behind the build, and two progress bars fighting
+  # over one terminal is unreadable. Resumable with -C -.
+  if curl -sS -L -C - --retry 5 --retry-delay 5 \
+       -o "$MODELS/$(basename "$URL")" "$URL" 2>"$STATE_DIR/model-download.log"; then
+    echo "OK $(basename "$URL")" > "$STATE_DIR/.model-result"
+    mark model
+  else
+    echo "FAILED" > "$STATE_DIR/.model-result"
+  fi
+}
+
+MODEL_PID=""
+rm -f "$STATE_DIR/.model-result"
+if [ -n "$EXISTING" ]; then
+  skip "found $(basename "$EXISTING")"
+  mark model
+elif [ "${NISOS_SKIP_MODEL:-0}" = "1" ]; then
+  warn "skipped by request -- routed commands will work, reasoned ones won't"
+elif done_already model; then
+  skip "done"
+else
+  fetch_model &
+  MODEL_PID=$!
+  ok "started (~2.5 GB, runs alongside the build)"
+fi
+
+# ==========================================================================
+step "Building llama.cpp and whisper.cpp"
+if done_already build; then
+  skip "binaries present"
+else
+  warn "The long one: 20-40 minutes. Nothing will ask you anything until it's done."
+  if bash "$NISOS_HOME/scripts/install.sh"; then
+    ok "built and stripped"
+    mark build
+  else
+    fail "build failed -- scroll up for the error, then re-run this script"
+    [ -n "$MODEL_PID" ] && wait "$MODEL_PID" 2>/dev/null
+    exit 1
+  fi
+fi
+
+# ==========================================================================
+step "Waiting for the model download"
+if [ -n "$MODEL_PID" ]; then
+  wait "$MODEL_PID" 2>/dev/null
+  RESULT="$(cat "$STATE_DIR/.model-result" 2>/dev/null || echo FAILED)"
+  case "$RESULT" in
+    OK\ *)   ok "${RESULT#OK }" ;;
+    NOMODEL) warn "Couldn't find a model automatically. Finish the install, then:"
+             printf '\n       %sNISOS_MODEL_URL="<link>" bash ~/nisos/scripts/bootstrap.sh%s\n' "$ACC" "$R"
+             printf '     %sGet the link from huggingface.co -- search "Qwen3 4B Instruct GGUF", Q4_K_M.%s\n' "$DIM" "$R" ;;
+    *)       warn "download failed -- re-run this script to resume where it stopped"
+             printf '     %ssee %s/model-download.log%s\n' "$DIM" "$STATE_DIR" "$R" ;;
+  esac
+else
+  skip "nothing to wait for"
 fi
 
 # ==========================================================================
@@ -270,6 +300,35 @@ MODEL=\$(find "$MODELS" -name '*.gguf' -size +100M | head -1)
 EOF
 chmod +x "$HOME/.termux/boot/nisos-server"
 ok "boot script (needs the Termux:Boot app to fire)"
+
+# ==========================================================================
+step "Starting the model"
+if curl -sf --max-time 2 http://127.0.0.1:8080/health >/dev/null 2>&1; then
+  ok "already running"
+else
+  MODEL_FILE="$(find "$MODELS" -name '*.gguf' -size +100M 2>/dev/null | head -1)"
+  if [ -n "$MODEL_FILE" ]; then
+    nohup "$NISOS_HOME/bin/llama-server" -m "$MODEL_FILE" \
+      --port 8080 -t 6 -c 4096 >> "$STATE_DIR/llama.log" 2>&1 &
+    printf '     loading'
+    for _ in $(seq 1 40); do
+      curl -sf --max-time 1 http://127.0.0.1:8080/health >/dev/null 2>&1 && break
+      printf '.'; sleep 1
+    done
+    printf '\n'
+    curl -sf --max-time 1 http://127.0.0.1:8080/health >/dev/null 2>&1 \
+      && ok "listening on :8080" || warn "slow to start -- check $STATE_DIR/llama.log"
+  else
+    warn "no model yet, skipping"
+  fi
+fi
+
+# ==========================================================================
+step "Self-test"
+python -m nisos --check
+printf '\n'
+printf '     %strying a typed command...%s\n' "$DIM" "$R"
+python -m nisos --text "άναψε τον φακό" --dry-run 2>/dev/null | tail -1
 
 # ==========================================================================
 step "The parts Android won't let a script do"
@@ -325,35 +384,6 @@ else
   esac
   mark updates
 fi
-
-# ==========================================================================
-step "Starting the model"
-if curl -sf --max-time 2 http://127.0.0.1:8080/health >/dev/null 2>&1; then
-  ok "already running"
-else
-  MODEL_FILE="$(find "$MODELS" -name '*.gguf' -size +100M 2>/dev/null | head -1)"
-  if [ -n "$MODEL_FILE" ]; then
-    nohup "$NISOS_HOME/bin/llama-server" -m "$MODEL_FILE" \
-      --port 8080 -t 6 -c 4096 >> "$STATE_DIR/llama.log" 2>&1 &
-    printf '     loading'
-    for _ in $(seq 1 40); do
-      curl -sf --max-time 1 http://127.0.0.1:8080/health >/dev/null 2>&1 && break
-      printf '.'; sleep 1
-    done
-    printf '\n'
-    curl -sf --max-time 1 http://127.0.0.1:8080/health >/dev/null 2>&1 \
-      && ok "listening on :8080" || warn "slow to start -- check $STATE_DIR/llama.log"
-  else
-    warn "no model yet, skipping"
-  fi
-fi
-
-# ==========================================================================
-step "Self-test"
-python -m nisos --check
-printf '\n'
-printf '     %strying a typed command...%s\n' "$DIM" "$R"
-python -m nisos --text "άναψε τον φακό" --dry-run 2>/dev/null | tail -1
 
 # ==========================================================================
 cat <<EOF

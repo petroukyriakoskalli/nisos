@@ -71,7 +71,12 @@ resolve, and it's the most common way this fails on step one.
 curl -sL https://raw.githubusercontent.com/petroukyriakoskalli/nisos/main/scripts/bootstrap.sh | bash
 ```
 
-That's the whole install. No account, no token, no ZIP.
+That's the whole install — full step-by-step in **[INSTALL.md](INSTALL.md)**.
+No account, no token, no ZIP.
+
+It runs unattended: the compile and the 2.5 GB model download happen at the same
+time, and nothing asks you a question until it's finished. Paste it, put the
+phone down, come back to four taps.
 
 Piping a script into your shell deserves a look first — it's a public repo, so
 read it before you run it if you'd rather:
