@@ -202,6 +202,9 @@ def build_context(config):
     return actions_module.ExecutionContext(
         dry_run=config.get_path("general.dry_run", False),
         tasker_task=config.get_path("tasker.task", "NisosAction"),
+        answer_timeout=float(config.get_path("tasker.answer_timeout", 4.0)),
+        calendar_answer=(config.expanded("tasker.calendar_answer")
+                         or actions_module.CALENDAR_ANSWER),
         contacts={k.lower(): v for k, v in
                   (config.get_path("contacts", {}) or {}).items()},
         memory=Memory(config.expanded("memory.path") or None),

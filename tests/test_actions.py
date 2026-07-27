@@ -51,19 +51,131 @@ class TestTorch:
 
 
 class TestTimer:
-    def test_sets_via_tasker(self, ctx):
+    def test_sends_the_standard_android_intent(self, ctx):
+        """No Tasker task: SET_TIMER is a platform intent any clock app answers."""
         key, fields = execute("timer.set", {"minutes": 12}, ctx)
         assert key == "timer.set"
         assert fields["minutes"] == 12
-        assert ctx.commands[0][0] == "am"
-        payload = json.loads(ctx.commands[0][ctx.commands[0].index("par2") + 1])
-        assert payload == {"minutes": 12}
+
+        command = ctx.commands[0]
+        assert command[:4] == ("am", "start", "-a",
+                               "android.intent.action.SET_TIMER")
+        assert command[command.index("android.intent.extra.alarm.LENGTH") + 1] == "720"
+        assert command[command.index("android.intent.extra.alarm.SKIP_UI") + 1] == "true"
 
     def test_no_duration_is_a_polite_failure(self, ctx):
         """A missing number usually means a Greek number word is unmapped."""
         key, _ = execute("timer.set", {"minutes": None}, ctx)
         assert key == "failed"
         assert ctx.commands == []
+
+
+class TestVolume:
+    """Percent in, stream steps out -- scaled to whatever the device reports."""
+
+    STREAMS = json.dumps([
+        {"stream": "alarm", "volume": 5, "max_volume": 7},
+        {"stream": "music", "volume": 8, "max_volume": 15},
+    ])
+
+    def _ctx(self):
+        return RecordingContext(responses={"termux-volume": self.STREAMS})
+
+    def test_scales_percent_to_device_steps(self):
+        ctx = self._ctx()
+        key, fields = execute("volume.set", {"level": 40}, ctx)
+        assert key == "volume.set"
+        assert fields["level"] == 40
+        assert ctx.commands[-1] == ("termux-volume", "music", "6")  # 40% of 15
+
+    def test_reads_the_maximum_rather_than_assuming_it(self):
+        """Step counts differ per device; 100% must mean the real maximum."""
+        ctx = RecordingContext(responses={
+            "termux-volume": json.dumps(
+                [{"stream": "music", "volume": 1, "max_volume": 30}])
+        })
+        execute("volume.set", {"level": 100}, ctx)
+        assert ctx.commands[-1] == ("termux-volume", "music", "30")
+
+    def test_quiet_but_audible_never_rounds_to_silence(self):
+        ctx = self._ctx()
+        execute("volume.set", {"level": 2}, ctx)
+        assert ctx.commands[-1] == ("termux-volume", "music", "1")
+
+    def test_zero_really_is_zero(self):
+        ctx = self._ctx()
+        execute("volume.set", {"level": 0}, ctx)
+        assert ctx.commands[-1] == ("termux-volume", "music", "0")
+
+    def test_unreadable_output_still_sets_something(self):
+        """A wrong-ish volume beats an error the user has to debug by voice."""
+        ctx = RecordingContext(responses={"termux-volume": "not json"})
+        key, _ = execute("volume.set", {"level": 100}, ctx)
+        assert key == "volume.set"
+        assert ctx.commands[-1] == ("termux-volume", "music", "15")
+
+    def test_no_level_is_a_polite_failure(self, ctx):
+        key, _ = execute("volume.set", {"level": None}, ctx)
+        assert key == "failed"
+
+
+class TestCalendar:
+    """The one action that genuinely needs Tasker, plus the stale-answer trap."""
+
+    def test_broadcasts_to_the_tasker_task(self, tmp_path, ctx):
+        ctx.calendar_answer = str(tmp_path / "calendar.json")
+        ctx.answer_timeout = 0.2
+        execute("calendar.next", {}, ctx)
+
+        command = ctx.commands[0]
+        assert command[0] == "am"
+        assert command[command.index("task_name") + 1] == "NisosAction"
+        assert command[command.index("par1") + 1] == "calendar.next"
+
+    def test_reads_the_answer_tasker_writes(self, tmp_path):
+        """The answer has to appear *after* the broadcast, as Tasker does it."""
+        answer = tmp_path / "calendar.json"
+
+        class AnsweringContext(RecordingContext):
+            def termux(self, *command):
+                answer.write_text('{"summary": "Standup", "minutes": 25}',
+                                  encoding="utf-8")
+                return super().termux(*command)
+
+        ctx = AnsweringContext()
+        ctx.calendar_answer = str(answer)
+        key, fields = execute("calendar.next", {}, ctx)
+        assert key == "calendar.next"
+        assert fields == {"summary": "Standup", "minutes": 25}
+
+    def test_stale_answer_is_deleted_before_asking(self, tmp_path, ctx):
+        """Yesterday's meeting reported as today's is worse than an error.
+
+        A Tasker task that fails silently leaves the previous answer on disk;
+        without deleting it first this returns instantly with stale data.
+        """
+        answer = tmp_path / "calendar.json"
+        answer.write_text('{"summary": "Yesterday", "minutes": 5}',
+                          encoding="utf-8")
+        ctx.calendar_answer = str(answer)
+        ctx.answer_timeout = 0.2
+
+        key, _ = execute("calendar.next", {}, ctx)
+        assert key == "failed"
+        assert not answer.exists()
+
+    def test_missing_tasker_task_says_so(self, tmp_path):
+        ctx = RecordingContext()
+        ctx.calendar_answer = str(tmp_path / "nope.json")
+        ctx.answer_timeout = 0.2
+        key, _ = execute("calendar.next", {}, ctx)
+        assert key == "failed"
+
+    def test_answer_path_is_on_shared_storage(self):
+        """Tasker cannot write into Termux's private app data. See the constant."""
+        from nisos.actions import CALENDAR_ANSWER
+        assert not CALENDAR_ANSWER.startswith("~")
+        assert "com.termux" not in CALENDAR_ANSWER
 
 
 class TestBattery:

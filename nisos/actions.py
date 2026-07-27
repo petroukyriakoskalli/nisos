@@ -42,14 +42,24 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 __all__ = [
     "action", "REGISTRY", "ActionError", "ExecutionContext",
-    "execute", "action_names",
+    "execute", "action_names", "CALENDAR_ANSWER",
 ]
 
 log = logging.getLogger(__name__)
+
+#: Where the Tasker task drops its answer for :func:`calendar_next`.
+#:
+#: ⚠️ This must be on *shared* storage. Termux's home
+#: (``/data/data/com.termux/files/home``) is private app data -- Tasker cannot
+#: write there without root, so a path under ``~/.nisos`` looks reasonable and
+#: can never work. ``/sdcard`` is the one place both apps can see, and Termux
+#: reaches it once ``termux-setup-storage`` has been run.
+CALENDAR_ANSWER = "/sdcard/nisos/calendar.json"
 
 
 class ActionError(Exception):
@@ -113,6 +123,9 @@ class ExecutionContext:
         dry_run: Log commands instead of running them.
         tasker_task: Name of the Tasker task that dispatches actions.
         timeout: Seconds to allow any single shell command.
+        answer_timeout: Seconds to wait for Tasker to write an answer file.
+            Generous, because a broadcast has to wake Tasker up first.
+        calendar_answer: Path Tasker writes the next calendar entry to.
         contacts: Alias table mapping mangled recogniser output back to real
             names. A Greek-locked recogniser renders "Anna" phonetically, so
             «στείλε στην Άννα» needs «αννα» -> "Anna" to find the contact.
@@ -121,6 +134,8 @@ class ExecutionContext:
     dry_run: bool = False
     tasker_task: str = "NisosAction"
     timeout: float = 10.0
+    answer_timeout: float = 4.0
+    calendar_answer: str = CALENDAR_ANSWER
     contacts: dict[str, str] = None  # type: ignore[assignment]
     memory: "object | None" = None
     country_code: str = ""
@@ -251,7 +266,11 @@ def torch_off(args: dict, ctx: ExecutionContext) -> dict:
 
 @action("timer.set")
 def timer_set(args: dict, ctx: ExecutionContext) -> dict:
-    """Start a countdown timer via Tasker.
+    """Start a countdown timer in whichever clock app handles ``SET_TIMER``.
+
+    Android has a standard intent for this, so it needs no Tasker task and no
+    special permission -- ``SKIP_UI`` means the timer starts without the clock
+    app coming to the foreground.
 
     Args:
         args: Expects ``minutes``. None means the recogniser heard a timer
@@ -261,8 +280,14 @@ def timer_set(args: dict, ctx: ExecutionContext) -> dict:
     minutes = args.get("minutes")
     if not minutes:
         raise ActionError("no duration heard")
-    ctx.tasker("timer.set", {"minutes": int(minutes)})
-    return {"minutes": int(minutes)}
+    minutes = int(minutes)
+    ctx.termux(
+        "am", "start", "-a", "android.intent.action.SET_TIMER",
+        "--ei", "android.intent.extra.alarm.LENGTH", str(minutes * 60),
+        "--ez", "android.intent.extra.alarm.SKIP_UI", "true",
+        "-e", "android.intent.extra.alarm.MESSAGE", "nisos",
+    )
+    return {"minutes": minutes}
 
 
 @action("battery.read")
@@ -317,35 +342,89 @@ def dnd_on(args: dict, ctx: ExecutionContext) -> dict:
 
 @action("volume.set")
 def volume_set(args: dict, ctx: ExecutionContext) -> dict:
-    """Set media volume, as a 0-100 level."""
+    """Set media volume, as a 0-100 level.
+
+    ``termux-volume`` works in stream steps, not percent, and the number of
+    steps differs per device and per stream -- so ask it for the maximum and
+    scale. Reading it rather than assuming 15 is what makes «βάλε την ένταση
+    στα 30» mean the same thing on any phone.
+    """
     level = args.get("level")
     if level is None:
         raise ActionError("no level heard")
     level = max(0, min(100, int(level)))
-    # termux-volume works in stream steps, not percent; Tasker handles percent.
-    ctx.tasker("volume.set", {"level": level})
+
+    raw = ctx.termux("termux-volume")
+    steps = _volume_steps(raw, level)
+    ctx.termux("termux-volume", "music", str(steps))
     return {"level": level}
+
+
+def _volume_steps(raw: str, level: int) -> int:
+    """Convert a 0-100 level into media-stream steps.
+
+    Args:
+        raw: ``termux-volume`` output -- a JSON array of
+            ``{"stream", "volume", "max_volume"}``.
+        level: The wanted level, 0-100.
+
+    Returns:
+        A step count within the stream's range. Falls back to 15 steps if the
+        output can't be parsed, since a slightly wrong volume beats an error.
+
+    Anything above zero rounds up to at least one step: asking for 5% and
+    getting silence looks like a failure.
+    """
+    maximum = 15
+    try:
+        for stream in json.loads(raw or "[]"):
+            if stream.get("stream") == "music":
+                maximum = int(stream.get("max_volume") or maximum)
+                break
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+
+    steps = round(level / 100 * maximum)
+    if level > 0 and steps == 0:
+        steps = 1
+    return max(0, min(maximum, steps))
 
 
 @action("calendar.next")
 def calendar_next(args: dict, ctx: ExecutionContext) -> dict:
     """Report the next calendar entry.
 
-    Tasker writes the answer to a file because broadcasts cannot return values.
-    The companion task should write JSON like
-    ``{"summary": "Standup", "minutes": 25}``.
+    Android exposes no calendar to a shell that isn't holding READ_CALENDAR, so
+    this one really does need Tasker. Broadcasts cannot return a value, so the
+    companion task writes JSON like ``{"summary": "Standup", "minutes": 25}``
+    to :data:`CALENDAR_ANSWER` and this waits for it.
+
+    The stale answer from the previous run is deleted *before* the broadcast
+    goes out. Without that, a Tasker task that fails silently looks like it
+    worked and reports yesterday's meeting.
     """
+    answer = Path(ctx.calendar_answer).expanduser()
+    try:
+        answer.unlink()
+    except OSError:
+        pass
+
     ctx.tasker("calendar.next")
-    path = "/data/data/com.termux/files/home/.nisos/calendar.json"
-    for _ in range(20):  # Tasker needs a moment to write it
+    if ctx.dry_run:
+        return {"summary": "nothing", "minutes": 0}
+
+    deadline = time.monotonic() + ctx.answer_timeout
+    while time.monotonic() < deadline:
         try:
-            with open(path, encoding="utf-8") as handle:
-                data = json.load(handle)
+            data = json.loads(answer.read_text(encoding="utf-8"))
             return {"summary": data.get("summary", "nothing"),
-                    "minutes": data.get("minutes", 0)}
-        except (FileNotFoundError, json.JSONDecodeError):
+                    "minutes": int(data.get("minutes", 0) or 0)}
+        except (FileNotFoundError, json.JSONDecodeError, ValueError):
             time.sleep(0.05)
-    raise ActionError("calendar didn't answer")
+    raise ActionError(
+        f"calendar didn't answer within {ctx.answer_timeout:.0f}s -- is the "
+        f"{ctx.tasker_task} task installed? See tasker/README.md"
+    )
 
 
 @action("time.read")
