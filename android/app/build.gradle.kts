@@ -55,6 +55,21 @@ android {
             // than throwing, which keeps a stray reference from failing a test
             // about the router.
             isReturnDefaultValues = true
+
+            all {
+                // Say which test failed and why, in the log.
+                //
+                // Gradle's default is to print "18 failed" and a path to an
+                // HTML report -- which on a CI runner is inside an artifact
+                // you have to download, unzip and parse before you know
+                // whether the problem is one bug or eighteen. It was one.
+                it.testLogging {
+                    events("failed")
+                    exceptionFormat =
+                        org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+                    showStackTraces = false
+                }
+            }
         }
     }
 }

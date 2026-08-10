@@ -46,10 +46,18 @@ private val NO_ARGS: ArgBuilder = { _, _ -> emptyMap() }
 
 /** One pattern in one language, and what to do when it fires. */
 data class Route(
-    val pattern: Regex,
+    val source: String,
     val action: String,
     val args: ArgBuilder = NO_ARGS,
-)
+) {
+    /**
+     * Compiled once, through [unicodePattern] -- which is not optional. A
+     * route written with a bare `Regex(...)` would silently stop matching
+     * Greek. Taking the source rather than a compiled pattern is what makes
+     * that impossible to get wrong on a new route.
+     */
+    val pattern: Regex = unicodePattern(source)
+}
 
 /**
  * What the router returns on a hit.
@@ -83,7 +91,7 @@ private fun levelIn(language: String): ArgBuilder =
  * **η** Μαριλένα είναι…» -- and storing "η μαριλενα" means a later lookup for
  * "μαριλενα" finds nothing.
  */
-private val ARTICLE = Regex(
+private val ARTICLE = unicodePattern(
     "^(?:ο|η|το|οι|τα|τον|την|τη|του|τησ|των|ενασ|μια|ενα|the|a|an)\\s+"
 )
 
@@ -101,8 +109,8 @@ fun stripArticle(text: String): String = ARTICLE.replace(text.trim(), "").trim()
 
 /** Removed wherever it appears: the verb, and the noun for what it goes in. */
 private val CHROME = mapOf(
-    "en" to Regex("^(put|add|schedule|book|create|make|new|calendar|diary|agenda|please)$"),
-    "el" to Regex("^(βαλ\\w*|βαζ\\w*|προσθεσ\\w*|προσθετ\\w*|γραψ\\w*|κλεισ\\w*" +
+    "en" to unicodePattern("^(put|add|schedule|book|create|make|new|calendar|diary|agenda|please)$"),
+    "el" to unicodePattern("^(βαλ\\w*|βαζ\\w*|προσθεσ\\w*|προσθετ\\w*|γραψ\\w*|κλεισ\\w*" +
         "|οριζ\\w*|ορισ\\w*|ημερολογ\\w*|ατζεντα|παρακαλω)$"),
 )
 
@@ -112,8 +120,8 @@ private val CHROME = mapOf(
  * γιατρό».
  */
 private val EDGE = mapOf(
-    "en" to Regex("^(in|into|to|on|at|for|with|of|my|the|a|an|it|this|that)$"),
-    "el" to Regex("^(στο|στη|στην|στον|στουσ|σε|μου|μασ|το|τη|την|τον|τα|οι|ο|η" +
+    "en" to unicodePattern("^(in|into|to|on|at|for|with|of|my|the|a|an|it|this|that)$"),
+    "el" to unicodePattern("^(στο|στη|στην|στον|στουσ|σε|μου|μασ|το|τη|την|τον|τα|οι|ο|η" +
         "|ενα|μια|ενασ|αυτο)$"),
 )
 
@@ -168,87 +176,87 @@ private fun titleOf(text: Normalised, indices: List<Int>, language: String): Str
 
 fun buildRoutes(clock: () -> LocalDateTime = { LocalDateTime.now() }): Map<String, List<Route>> = mapOf(
     "en" to listOf(
-        Route(Regex("\\b(torch|flashlight) (on|off)\\b"), "torch.on"),
-        Route(Regex("\\b(turn |switch )?(on|off) (the )?(torch|light|flashlight)\\b"), "torch.on"),
+        Route("\\b(torch|flashlight) (on|off)\\b", "torch.on"),
+        Route("\\b(turn |switch )?(on|off) (the )?(torch|light|flashlight)\\b", "torch.on"),
         // "open the light" is how a Greek speaker says this in English, and is
         // exactly what got typed the first time this ran on a phone.
-        Route(Regex("\\b(open|close) (the )?(torch|light|flashlight)\\b"), "torch.on"),
-        Route(Regex("\\b(set (a |the )?)?timer\\b"), "timer.set", minutesIn("en")),
-        Route(Regex("\\bremind me in\\b"), "timer.set", minutesIn("en")),
-        Route(Regex("\\b(battery|charge level)\\b"), "battery.read"),
+        Route("\\b(open|close) (the )?(torch|light|flashlight)\\b", "torch.on"),
+        Route("\\b(set (a |the )?)?timer\\b", "timer.set", minutesIn("en")),
+        Route("\\bremind me in\\b", "timer.set", minutesIn("en")),
+        Route("\\b(battery|charge level)\\b", "battery.read"),
         // Above calendar.next and above the message routes: "book a meeting"
         // is not a request to be told about your next one.
-        Route(Regex("\\b(put|add|schedule|book|create|make)\\b.*\\b(calendar|diary|agenda)\\b"),
+        Route("\\b(put|add|schedule|book|create|make)\\b.*\\b(calendar|diary|agenda)\\b",
             "calendar.add", appointmentIn("en", clock)),
-        Route(Regex("\\b(schedule|book)\\b.*\\b(meeting|appointment)\\b"),
+        Route("\\b(schedule|book)\\b.*\\b(meeting|appointment)\\b",
             "calendar.add", appointmentIn("en", clock)),
-        Route(Regex("\\btext (\\w+)\\b"), "sms.send") { text, m ->
+        Route("\\btext (\\w+)\\b", "sms.send") { text, m ->
             mapOf("to" to m.groupValues[1], "body" to text.text.substring(m.range.last + 1).trim())
         },
-        Route(Regex("\\b(copy|clipboard)\\b"), "clipboard.set") { text, m ->
+        Route("\\b(copy|clipboard)\\b", "clipboard.set") { text, m ->
             mapOf("text" to text.text.substring(m.range.last + 1).trim())
         },
-        Route(Regex("\\b(silence|silent|do not disturb|dnd)\\b"), "dnd.on"),
-        Route(Regex("\\b(volume|sound)\\b"), "volume.set", levelIn("en")),
-        Route(Regex("\\b(next |upcoming )?(meeting|appointment|calendar)\\b"), "calendar.next"),
-        Route(Regex("\\bwhat time is it\\b|\\bthe time\\b"), "time.read"),
+        Route("\\b(silence|silent|do not disturb|dnd)\\b", "dnd.on"),
+        Route("\\b(volume|sound)\\b", "volume.set", levelIn("en")),
+        Route("\\b(next |upcoming )?(meeting|appointment|calendar)\\b", "calendar.next"),
+        Route("\\bwhat time is it\\b|\\bthe time\\b", "time.read"),
         // Memory. Specific shapes only -- a broad "what is X" would swallow
         // every general-knowledge question and answer "nothing stored".
-        Route(Regex("\\bremember (?:that )?(.+?) (?:is|are|'s) (.+)"), "memory.remember") { _, m ->
+        Route("\\bremember (?:that )?(.+?) (?:is|are|'s) (.+)", "memory.remember") { _, m ->
             mapOf("key" to stripArticle(m.groupValues[1]), "value" to m.groupValues[2])
         },
-        Route(Regex("\\bforget (?:about )?(.+)"), "memory.forget") { _, m ->
+        Route("\\bforget (?:about )?(.+)", "memory.forget") { _, m ->
             mapOf("key" to stripArticle(m.groupValues[1]))
         },
-        Route(Regex("\\bwhat do you remember\\b|\\bhow much do you remember\\b"), "memory.list"),
-        Route(Regex("\\bwhat(?:'s| is) (.+?)(?:'s)? (?:number|phone)\\b"), "memory.recall") { _, m ->
+        Route("\\bwhat do you remember\\b|\\bhow much do you remember\\b", "memory.list"),
+        Route("\\bwhat(?:'s| is) (.+?)(?:'s)? (?:number|phone)\\b", "memory.recall") { _, m ->
             mapOf("key" to stripArticle(m.groupValues[1]))
         },
-        Route(Regex("\\bwhat do you know about (.+)"), "memory.recall") { _, m ->
+        Route("\\bwhat do you know about (.+)", "memory.recall") { _, m ->
             mapOf("key" to stripArticle(m.groupValues[1]))
         },
     ),
     "el" to listOf(
         // Stems, always. αναψ- covers άναψε / ανάψτε / να ανάψεις.
-        Route(Regex("\\b(αναψ|ανοιξ)\\w*\\b.*\\bφακ"), "torch.on"),
-        Route(Regex("\\b(σβησ|κλεισ)\\w*\\b.*\\bφακ"), "torch.off"),
-        Route(Regex("\\bφακ\\w*\\b.*\\b(αναψ|ανοιξ)"), "torch.on"),
-        Route(Regex("\\bφακ\\w*\\b.*\\b(σβησ|κλεισ)"), "torch.off"),
-        Route(Regex("\\b(χρονομετρ|ταιμερ|αντιστροφ)"), "timer.set", minutesIn("el")),
-        Route(Regex("\\bθυμισε μου σε\\b"), "timer.set", minutesIn("el")),
-        Route(Regex("\\bμπαταρι"), "battery.read"),
+        Route("\\b(αναψ|ανοιξ)\\w*\\b.*\\bφακ", "torch.on"),
+        Route("\\b(σβησ|κλεισ)\\w*\\b.*\\bφακ", "torch.off"),
+        Route("\\bφακ\\w*\\b.*\\b(αναψ|ανοιξ)", "torch.on"),
+        Route("\\bφακ\\w*\\b.*\\b(σβησ|κλεισ)", "torch.off"),
+        Route("\\b(χρονομετρ|ταιμερ|αντιστροφ)", "timer.set", minutesIn("el")),
+        Route("\\bθυμισε μου σε\\b", "timer.set", minutesIn("el")),
+        Route("\\bμπαταρι", "battery.read"),
         // Above the message routes: «γράψε στο ημερολόγιο» matches the sms
         // pattern otherwise, and sends a text to somebody called «ημερολόγιο».
-        Route(Regex("\\b(βαλ|βαζ|προσθεσ|προσθετ|γραψ)\\w*\\b.*\\bημερολογ"),
+        Route("\\b(βαλ|βαζ|προσθεσ|προσθετ|γραψ)\\w*\\b.*\\bημερολογ",
             "calendar.add", appointmentIn("el", clock)),
-        Route(Regex("\\b(κλεισ|βαλ|βαζ|οριζ|ορισ)\\w*\\b.*\\b(ραντεβου|συναντηση)"),
+        Route("\\b(κλεισ|βαλ|βαζ|οριζ|ορισ)\\w*\\b.*\\b(ραντεβου|συναντηση)",
             "calendar.add", appointmentIn("el", clock)),
         // The article list has to be generous. Spoken Greek drops the final nu
         // constantly, and missing one means the article is captured as the
         // recipient's name. Longest alternatives first, or «στο» shadows «στον».
-        Route(Regex("\\b(στειλ|γραψ)\\w*\\b\\s+(?:μηνυμα\\s+)?(?:στ(?:ον|ην|ουσ|ισ|η|ο|α)\\s+)?(\\w+)"),
+        Route("\\b(στειλ|γραψ)\\w*\\b\\s+(?:μηνυμα\\s+)?(?:στ(?:ον|ην|ουσ|ισ|η|ο|α)\\s+)?(\\w+)",
             "sms.send") { text, m ->
             mapOf("to" to m.groupValues[2], "body" to text.text.substring(m.range.last + 1).trim())
         },
-        Route(Regex("\\b(αντιγραψ|κοπι)"), "clipboard.set") { text, m ->
+        Route("\\b(αντιγραψ|κοπι)", "clipboard.set") { text, m ->
             mapOf("text" to text.text.substring(m.range.last + 1).trim())
         },
-        Route(Regex("\\b(σιγαση|ησυχι|μην ενοχλ)"), "dnd.on"),
-        Route(Regex("\\b(ενταση|ηχ)\\w*"), "volume.set", levelIn("el")),
-        Route(Regex("\\b(ραντεβου|συναντηση|ημερολογ)"), "calendar.next"),
-        Route(Regex("\\bτι ωρα ειναι\\b|\\bη ωρα\\b"), "time.read"),
+        Route("\\b(σιγαση|ησυχι|μην ενοχλ)", "dnd.on"),
+        Route("\\b(ενταση|ηχ)\\w*", "volume.set", levelIn("el")),
+        Route("\\b(ραντεβου|συναντηση|ημερολογ)", "calendar.next"),
+        Route("\\bτι ωρα ειναι\\b|\\bη ωρα\\b", "time.read"),
         // θυμησου / θυμηθειτε / να θυμασαι share the θυμ- stem, but so does
         // «τι θυμάσαι», so the list route has to come first.
-        Route(Regex("\\bτι θυμασαι\\b|\\bποσα θυμασαι\\b"), "memory.list"),
-        Route(Regex("\\bθυμ\\w*\\s+(?:οτι\\s+)?(.+?)\\s+ειναι\\s+(.+)"), "memory.remember") { _, m ->
+        Route("\\bτι θυμασαι\\b|\\bποσα θυμασαι\\b", "memory.list"),
+        Route("\\bθυμ\\w*\\s+(?:οτι\\s+)?(.+?)\\s+ειναι\\s+(.+)", "memory.remember") { _, m ->
             mapOf("key" to stripArticle(m.groupValues[1]), "value" to m.groupValues[2])
         },
-        Route(Regex("\\b(?:ξεχνα|ξεχασε)\\s+(.+)"), "memory.forget") { _, m ->
+        Route("\\b(?:ξεχνα|ξεχασε)\\s+(.+)", "memory.forget") { _, m ->
             mapOf("key" to stripArticle(m.groupValues[1]))
         },
-        Route(Regex("\\bποιο ειναι το (?:τηλεφωνο|νουμερο)\\s+(?:τη[σ]?|του|των)?\\s*(.+)"),
+        Route("\\bποιο ειναι το (?:τηλεφωνο|νουμερο)\\s+(?:τη[σ]?|του|των)?\\s*(.+)",
             "memory.recall") { _, m -> mapOf("key" to stripArticle(m.groupValues[1])) },
-        Route(Regex("\\bτι ξερεισ για\\s+(.+)"), "memory.recall") { _, m ->
+        Route("\\bτι ξερεισ για\\s+(.+)", "memory.recall") { _, m ->
             mapOf("key" to stripArticle(m.groupValues[1]))
         },
     ),
@@ -260,14 +268,14 @@ fun buildRoutes(clock: () -> LocalDateTime = { LocalDateTime.now() }): Map<Strin
  * direction below. Greek recognisers render the brand phonetically about as
  * often as they get it right, hence the variants.
  */
-private val WHATSAPP = Regex("whats\\s?app|ουατσαπ|βοτσαπ|γουατσαπ")
+private val WHATSAPP = unicodePattern("whats\\s?app|ουατσαπ|βοτσαπ|γουατσαπ")
 
 /**
  * The torch patterns capture a direction word, so the router rewrites the
  * action name rather than the tables carrying every phrasing twice. Only ever
  * consulted for torch.on, so "close" here cannot affect anything else.
  */
-private val DIRECTION_OFF = Regex("\\b(off|close|σβησ|κλεισ)")
+private val DIRECTION_OFF = unicodePattern("\\b(off|close|σβησ|κλεισ)")
 
 /**
  * Words that end one command and start the next. Both languages in one set,

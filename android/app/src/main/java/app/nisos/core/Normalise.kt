@@ -19,6 +19,32 @@ import java.text.Normalizer
  * JVM unit test in milliseconds.
  */
 
+/**
+ * Compile a pattern that can actually see Greek.
+ *
+ * ⚠️ **Every regex in this program must go through here.** Java's `\w` is
+ * ASCII-only unless `UNICODE_CHARACTER_CLASS` is on, and the failure is not
+ * the obvious one:
+ *
+ * ```
+ * "\\bφακ"                          matches   -- \b alone IS Unicode-aware
+ * "αναψ\\w*"                        matches   -- \w* happily matches zero
+ * "\\b(αναψ|ανοιξ)\\w*\\b.*\\bφακ"  FAILS     -- and this is a torch route
+ * ```
+ *
+ * The two harmless-looking pieces combine into a broken one: `\w*` matches
+ * nothing, so `\b` is then asked for a boundary in the middle of «αναψε», and
+ * there isn't one. Every Greek stem route in the table is written that way,
+ * so without the flag the assistant is silently English-only -- which is
+ * exactly what the first CI run showed, and exactly what nobody would notice
+ * until standing in a dark room asking for the torch.
+ *
+ * Python has no equivalent trap: `\w` there is Unicode-aware by default for
+ * str patterns, which is why the tables worked as written for months before
+ * being retyped into Kotlin.
+ */
+fun unicodePattern(source: String): Regex = Regex("(?U)$source")
+
 /** Greek block, roughly. Only ever used to tell the two scripts apart. */
 private val GREEK = Regex("[\\u0370-\\u03FF\\u1F00-\\u1FFF]")
 private val LATIN = Regex("[a-zA-Z]")
@@ -149,7 +175,11 @@ fun parseNumber(text: String, language: String? = null): Int? {
     for (lang in order) {
         val table = NUMBER_WORDS[lang] ?: continue
         for (word in table.keys.sortedByDescending { it.length }) {
-            if (Regex("\\b${Regex.escape(word)}\\b").containsMatchIn(text)) {
+            // «δωδεκα» would in fact survive a bare Regex here -- `\b` alone
+            // is Unicode-aware in Java; it is `\w` that is not. Going through
+            // the helper anyway, so nobody has to know which of the two this
+            // line happens to use.
+            if (unicodePattern("\\b${Regex.escape(word)}\\b").containsMatchIn(text)) {
                 return table[word]
             }
         }
