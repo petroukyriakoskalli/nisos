@@ -9,7 +9,7 @@
       file on shared storage.
 
       RECORD_AUDIO   the microphone, for the recogniser
-      SEND_SMS       «στείλε στη Μαρία» -- sends without a tap, unlike WhatsApp
+      SEND_SMS       «στείλε στη Μαρία» — sends without a tap, unlike WhatsApp
       READ_CONTACTS  turning a spoken name into a number
       *_CALENDAR     calendar.next and calendar.add, natively
       CAMERA is NOT here: setTorchMode has needed no permission since API 23.
@@ -54,7 +54,7 @@
             </intent-filter>
 
             <!--
-              Lets the phone's own "assist" gesture open it -- long-press home,
+              Lets the phone's own "assist" gesture open it — long-press home,
               or a side-key double press mapped to the assistant. This is the
               trigger Termux could never have: the back-tap and volume-key
               recipes in tasker/README.md are all workarounds for not being

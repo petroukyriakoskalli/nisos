@@ -2,7 +2,7 @@
 <resources>
     <!--
       A dark, chrome-free window. The Compose tree paints everything, so the
-      only job here is to stop a white flash between launch and first frame --
+      only job here is to stop a white flash between launch and first frame —
       which on a black assistant is the most jarring thing the app could do.
     -->
     <style name="Theme.Nisos" parent="android:Theme.Material.NoActionBar">
