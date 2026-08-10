@@ -2,6 +2,9 @@ package app.nisos.android
 
 import android.content.Context
 import org.json.JSONObject
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 /**
  * What it has been told, and the API key.
@@ -94,6 +97,51 @@ class Memory(context: Context) {
             .associate { it.key to it.value }
     }
 
+    // -- money -------------------------------------------------------------
+    /**
+     * A figure you told it, with when you told it.
+     *
+     * The timestamp is the point. A manual balance is exactly as accurate as
+     * the last time you looked, and the spoken total says "oldest 3/8" once it
+     * is stale enough to matter -- which is the difference between a number
+     * you can act on and one you merely hear.
+     */
+    fun setBalance(account: String, amount: Double) {
+        val key = account.lowercase().trim()
+        facts.edit()
+            .putString("$MONEY$key", amount.toString())
+            .putLong("$MONEY_AT$key", System.currentTimeMillis())
+            .apply()
+    }
+
+    fun balance(account: String): Pair<Double, LocalDateTime?>? {
+        val key = account.lowercase().trim()
+        val amount = facts.getString("$MONEY$key", null)?.toDoubleOrNull() ?: return null
+        val at = facts.getLong("$MONEY_AT$key", 0L).takeIf { it > 0 }?.let {
+            Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDateTime()
+        }
+        return amount to at
+    }
+
+    fun balanceAccounts(): List<String> =
+        facts.all.keys.filter { it.startsWith(MONEY) }.map { it.removePrefix(MONEY) }.sorted()
+
+    /** Senders whose texts get read for a balance. Empty means none, and
+     *  READ_SMS is never requested. */
+    fun smsSenders(): List<String> =
+        facts.getStringSet(SMS_SENDERS, emptySet())?.sorted().orEmpty()
+
+    fun setSmsSenders(senders: Collection<String>) {
+        facts.edit().putStringSet(SMS_SENDERS, senders.map { it.trim() }.filter { it.isNotEmpty() }.toSet()).apply()
+    }
+
+    /** A read-only Wise token. Stored beside the API key, not in the facts. */
+    var wiseToken: String?
+        get() = secrets.getString(WISE, null)?.takeIf { it.isNotBlank() }
+        set(value) = secrets.edit().apply {
+            if (value.isNullOrBlank()) remove(WISE) else putString(WISE, value.trim())
+        }.apply()
+
     // -- helpers -----------------------------------------------------------
     private fun digitsOf(value: String) = value.filter { it.isDigit() || it == '+' }
 
@@ -112,6 +160,10 @@ class Memory(context: Context) {
         const val FACT = "fact:"
         const val CONTACT = "contact:"
         const val ALIAS = "alias:"
+        const val MONEY = "money:"
+        const val MONEY_AT = "money-at:"
+        const val SMS_SENDERS = "sms-senders"
+        const val WISE = "wise-token"
     }
 }
 

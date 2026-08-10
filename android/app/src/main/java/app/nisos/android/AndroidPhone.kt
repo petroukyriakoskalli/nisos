@@ -18,6 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
 import app.nisos.core.ActionError
 import app.nisos.core.CalendarEntry
+import app.nisos.core.MoneySource
 import app.nisos.core.Phone
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -250,6 +251,12 @@ class AndroidPhone(
     }
 
     override fun resolveContact(name: String): String = memory.alias(name) ?: name
+
+    // -- money -------------------------------------------------------------
+    override fun moneySources(): List<MoneySource> = Balances.sources(context, memory)
+
+    override fun setBalance(account: String, amount: Double) =
+        memory.setBalance(account, amount)
 
     // -- memory ------------------------------------------------------------
     override fun remember(key: String, value: String) = memory.remember(key, value)

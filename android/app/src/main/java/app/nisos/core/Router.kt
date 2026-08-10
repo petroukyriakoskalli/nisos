@@ -184,6 +184,14 @@ fun buildRoutes(clock: () -> LocalDateTime = { LocalDateTime.now() }): Map<Strin
         Route("\\b(set (a |the )?)?timer\\b", "timer.set", minutesIn("en")),
         Route("\\bremind me in\\b", "timer.set", minutesIn("en")),
         Route("\\b(battery|charge level)\\b", "battery.read"),
+        // Money. money.set first: "set my eurolife to 12000" also contains
+        // "how much"-shaped words in some phrasings, and a question must never
+        // overwrite a figure.
+        Route("\\b(set|update)\\b.*\\b(\\w+)\\b\\s+(?:to|at)\\s+([\\d.,]+)", "money.set") { _, m ->
+            mapOf("account" to m.groupValues[2], "amount" to m.groupValues[3])
+        },
+        Route("\\b(how much money|how much do i have|my balance|total balance" +
+            "|how much have i got)\\b", "money.total"),
         // Above calendar.next and above the message routes: "book a meeting"
         // is not a request to be told about your next one.
         Route("\\b(put|add|schedule|book|create|make)\\b.*\\b(calendar|diary|agenda)\\b",
@@ -225,6 +233,16 @@ fun buildRoutes(clock: () -> LocalDateTime = { LocalDateTime.now() }): Map<Strin
         Route("\\b(χρονομετρ|ταιμερ|αντιστροφ)", "timer.set", minutesIn("el")),
         Route("\\bθυμισε μου σε\\b", "timer.set", minutesIn("el")),
         Route("\\bμπαταρι", "battery.read"),
+        // Money. «βάλε το eurolife στα 12000» before the question forms, and
+        // both before the memory routes -- «θυμήσου ότι το eurolife είναι
+        // 12000» is a legitimate way to say it and memory.remember would
+        // otherwise swallow it into the facts store where no total can see it.
+        Route("\\b(βαλ|βαζ|θυμ|ενημερωσ)\\w*\\b.*\\b(\\w+)\\s+" +
+            "(?:στα|ειναι|εχει)\\s+([\\d.,]+)", "money.set") { _, m ->
+            mapOf("account" to m.groupValues[2], "amount" to m.groupValues[3])
+        },
+        Route("\\b(ποσα (?:λεφτα|χρηματα|ευρω)|ποσα εχω|το υπολοιπο" +
+            "|υπολοιπο μου)", "money.total"),
         // Above the message routes: «γράψε στο ημερολόγιο» matches the sms
         // pattern otherwise, and sends a text to somebody called «ημερολόγιο».
         Route("\\b(βαλ|βαζ|προσθεσ|προσθετ|γραψ)\\w*\\b.*\\bημερολογ",

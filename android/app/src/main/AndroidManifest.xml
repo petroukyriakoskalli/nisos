@@ -23,6 +23,16 @@
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!--
+      READ_SMS is for money.total only: Cyprus banks text you a balance after
+      every card transaction, and that message is already on the phone. It is
+      also access to every message you have, so unlike the permissions above it
+      is NOT requested at launch — it is asked for the first time you name a
+      bank sender, and never otherwise. Declared here because a runtime request
+      is impossible without it, not because the app wants it.
+    -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+
     <!-- Android 11+ hides other apps unless you say which you need to see. -->
     <queries>
         <intent>

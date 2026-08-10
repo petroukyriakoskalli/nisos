@@ -55,6 +55,17 @@ val SAY: Map<String, Map<String, String>> = mapOf(
         "el" to "{summary}, {date} στις {time}.",
     ),
     "time.read" to mapOf("en" to "It's {time}.", "el" to "Η ώρα είναι {time}."),
+    // {note} carries the honesty: how many sources answered when not all did,
+    // other currencies, and how old the oldest reading is. Empty on the happy
+    // path, so the common case is just the number.
+    "money.total" to mapOf(
+        "en" to "{amount} {currency}. {note}",
+        "el" to "{amount} {currency}. {note}",
+    ),
+    "money.set" to mapOf(
+        "en" to "{account}, {amount}. Noted.",
+        "el" to "{account}, {amount}. Το σημείωσα.",
+    ),
     // Spoken by the model itself -- the template passes its text through.
     "answer" to mapOf("en" to "{text}", "el" to "{text}"),
 

@@ -1,5 +1,6 @@
 package app.nisos.core
 
+import java.time.Duration
 import java.time.LocalDateTime
 import java.util.Locale
 
@@ -58,6 +59,16 @@ interface Phone {
 
     /** A phone number for a spoken name, from contacts or from memory. */
     fun lookupNumber(name: String): String?
+
+    /**
+     * Every configured balance source. Empty is a legitimate answer and means
+     * nothing has been set up yet, which the reply says out loud rather than
+     * reporting a confident zero.
+     */
+    fun moneySources(): List<MoneySource> = emptyList()
+
+    /** Store a figure you told it, for [ManualSource] to read back. */
+    fun setBalance(account: String, amount: Double) = Unit
 
     /** Resolve a heard name to the real contact name. */
     fun resolveContact(name: String): String = name
@@ -217,10 +228,70 @@ val REGISTRY: Map<String, Handler> = mapOf(
         mapOf("facts" to facts, "contacts" to contacts)
     },
 
+    // "How much money do I have." Every source behind this is read-only by
+    // construction -- see the note at the top of Money.kt.
+    "money.total" to { _, phone ->
+        val sources = phone.moneySources()
+        if (sources.isEmpty()) throw ActionError("no money sources configured")
+
+        val wealth = total(sources, phone.now())
+        if (wealth.answered == 0) throw ActionError("no source could answer")
+
+        // "Three of four" and "three of three" are different answers and must
+        // not sound the same: an account that has quietly gone missing is the
+        // one failure that matters when the number *is* the answer.
+        val partial = wealth.answered < wealth.asked
+        val stale = wealth.stalest?.let {
+            Duration.between(it, phone.now()) > STALE_AFTER
+        } ?: false
+
+        mapOf(
+            "amount" to formatMoney(wealth.primaryAmount),
+            "currency" to wealth.primary,
+            "answered" to wealth.answered,
+            "asked" to wealth.asked,
+            "note" to buildString {
+                if (partial) append(" (${wealth.answered} of ${wealth.asked})")
+                if (wealth.others.isNotEmpty()) {
+                    append(" + ${wealth.others.joinToString(", ")}")
+                }
+                if (stale && wealth.stalest != null) {
+                    append(" — oldest ${wealth.stalest!!.dayOfMonth}/${wealth.stalest!!.monthValue}")
+                }
+            }.trim(),
+        )
+    },
+
+    // «θυμήσου ότι το eurolife είναι 12000» -- the source of last resort, and
+    // the only one that reaches an insurance or pension portal.
+    "money.set" to { args, phone ->
+        val account = args.string("account").lowercase()
+        if (account.isEmpty()) throw ActionError("no account heard")
+        val amount = when (val raw = args["amount"]) {
+            is Number -> raw.toDouble()
+            is String -> SmsBalanceSource.europeanNumber(raw.trim())
+            else -> null
+        } ?: throw ActionError("no amount heard")
+
+        phone.setBalance(account, amount)
+        mapOf("account" to account, "amount" to formatMoney(amount))
+    },
+
     "answer" to { args, _ -> mapOf("text" to args.string("text")) },
 
     "unclear" to { _, _ -> emptyMap() },
 )
+
+/**
+ * A money amount as it should be *spoken*.
+ *
+ * Whole euros, grouped. Reading the cents of a five-figure balance aloud is
+ * noise -- nobody asking "how much money do I have" wants "and forty-three
+ * cents" -- and the grouping is what makes 12,340 land as twelve thousand
+ * rather than a string of digits.
+ */
+fun formatMoney(amount: Double): String =
+    String.format(Locale.UK, "%,.0f", amount)
 
 /** Every registered action name, sorted. */
 fun actionNames(): List<String> = REGISTRY.keys.sorted()
