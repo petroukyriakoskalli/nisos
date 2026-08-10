@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.6.0 — 2026-08-10
+
+### Added
+
+- **`money.total`.** Balances, from sources that cannot move money — a
+  read-only token, a message the bank already sent you, a figure you typed in.
+  That constraint is the design and not a caveat on it: a credential that can
+  move money, sitting on a phone behind a screen lock, is a different risk
+  category from a token that can only read a number, and the assistant gains
+  nothing from the difference. It only ever needed to read.
+
+  Cyprus banks are covered by parsing their balance SMS (no personal API, but
+  they text you after every card transaction and the message is already on the
+  phone). Wise by a read-only personal token. myEurolife by a figure you tell
+  it, because insurance and pension portals have no public API and it is that
+  or nothing. Revolut needs open banking and is not built.
+
+  Two refusals worth knowing. **One source cannot take the total down** — a
+  source that can't answer is skipped, and one that throws is caught, because
+  one unreachable bank turning "you have €12,340" into "that didn't work" for
+  three reachable accounts is the worst outcome available. And **a partial
+  total never sounds complete**: three of four says "(3 of 4)" out loud, a
+  stale reading gets dated, and another currency is mentioned rather than
+  converted, since converting needs a live rate this app must not guess.
+
+  The SMS parser requires a balance *word* within 40 characters of the amount,
+  so "You spent EUR 45.20 at LIDL" yields nothing on purpose — a transaction
+  text names two numbers and taking the wrong one is a confidently wrong
+  balance. `READ_SMS` is requested only when you first name a bank sender,
+  never at launch.
+
+### Removed
+
+- **Termux, and everything that existed only to work around being a terminal
+  program**: the Python package and its 288 tests, the Tasker bridge, twelve
+  shell scripts, the GBNF grammar, the llama.cpp/whisper.cpp cross-compile
+  workflow, and the config file that configured all of it.
+
+  None of it was bad code. It was the right design for a constraint that no
+  longer exists — reasoning had to run on the phone, so a 4B model had to run
+  on the phone, so it had to be Termux, so every permission Android reserves
+  for apps had to be borrowed from Tasker through a broadcast that cannot
+  return a value. Take away the local model and the whole chain unwinds.
+
+  ⚠️ This is ahead of the evidence: the gate was an APK on the phone with the
+  Greek, multi-action and calendar tests passing, and that has not happened.
+  Recovery is `git checkout feature/multi-action`, which is pushed.
+
 ## v0.5.0 — 2026-08-10 — an Android app
 
 ### Added

@@ -14,8 +14,8 @@ android {
         // below that is a phone from 2017. Nothing here needs to run on one.
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.5.0"
+        versionCode = 2
+        versionName = "0.6.0"
     }
 
     buildTypes {
