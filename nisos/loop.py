@@ -52,6 +52,8 @@ class Turn:
         spoken: What was said back.
         path: ``"routed"`` or ``"reasoned"`` -- which branch was taken.
         source: Which recogniser won.
+        backend: Which brain answered on a reasoned turn -- ``"claude"`` or
+            ``"llama"``. Empty on a routed turn, where no model ran at all.
         timings: Milliseconds per stage, for the log line.
     """
 
@@ -62,13 +64,20 @@ class Turn:
     spoken: str = ""
     path: str = "routed"
     source: str = "typed"
+    backend: str = ""
     timings: dict = field(default_factory=dict)
 
     def summary(self) -> str:
-        """One line describing the turn, in the style of the Termux log."""
+        """One line describing the turn, in the style of the Termux log.
+
+        The backend is in here because "that took four seconds" has different
+        answers depending on whether it went to the phone or to the network,
+        and the log is the only place you can tell after the fact.
+        """
         total = sum(self.timings.values())
         stages = "  ".join(f"{k} {v:.0f}ms" for k, v in self.timings.items())
-        return (f"[{self.path}/{self.language}] {self.heard!r} -> {self.action} "
+        via = f"{self.path}:{self.backend}" if self.backend else self.path
+        return (f"[{via}/{self.language}] {self.heard!r} -> {self.action} "
                 f"| {stages} | total {total:.0f}ms")
 
 
@@ -122,18 +131,26 @@ def handle(text: str, config, context=None,
                                    actions_module.action_names(), config,
                                    memories=memories)
             turn.timings["model"] = decision.seconds * 1000
+            turn.backend = decision.backend
             action_name, args = decision.action, decision.args
         except brain.BrainError as exc:
             log.error("%s", exc)
-            # Two very different failures used to say the same thing. "Can't do
-            # that offline" is right for a phrase that genuinely needs the
-            # network, and actively misleading when the truth is that
-            # llama-server simply is not up -- which is the normal state in app
-            # mode, where the UI deliberately doesn't start it. Saying the
-            # wrong one sends you looking for a network problem on a program
-            # whose whole point is not having one.
-            reachable = brain.available(config.get_path("brain.url"), timeout=1.0)
-            turn.action = "unavailable" if reachable else "no_model"
+            # Several very different failures used to say the same thing.
+            # "Can't do that offline" is right for a phrase that genuinely
+            # needs the network, and actively misleading when the truth is a
+            # missing API key or an llama-server that simply is not up -- which
+            # is the normal state in app mode, where the UI deliberately
+            # doesn't start it. Saying the wrong one sends you looking for a
+            # network problem on a program that may not even want one.
+            #
+            # A BrainError that knows which it was says so (exc.reply_key); the
+            # fallback probe is for the ones that don't.
+            if exc.reply_key:
+                turn.action = exc.reply_key
+            else:
+                reachable = brain.available(config.get_path("brain.url"),
+                                            timeout=1.0)
+                turn.action = "unavailable" if reachable else "no_model"
             turn.spoken = replies.say(turn.action, turn.language)
             speech.speak(turn.spoken, turn.language, config)
             return turn

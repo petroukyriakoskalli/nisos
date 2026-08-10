@@ -21,11 +21,21 @@
 # again and it picks up where it stopped. Nothing is redone.
 #
 # Options:
+#   NISOS_ONLINE=1          online brain (Claude API): no 2.5 GB model, no
+#                           40-minute wait for one. ~15 minutes instead of ~50.
+#                           Asks for an API key near the end.
 #   NISOS_MODEL_URL=<url>   skip model auto-discovery and use this
 #   NISOS_SKIP_MODEL=1      don't fetch a model at all
 #   NISOS_FORCE=<step>      re-run one step, e.g. NISOS_FORCE=build
 #
 set -uo pipefail
+
+# Online mode is "no local model" plus a key prompt. The download and the three
+# steps that depend on it already handle a missing model, so this reuses that
+# path rather than adding a second one.
+if [ "${NISOS_ONLINE:-0}" = "1" ]; then
+  NISOS_SKIP_MODEL=1
+fi
 
 NISOS_HOME="${NISOS_HOME:-$HOME/nisos}"
 STATE_DIR="$HOME/.nisos"
@@ -75,8 +85,13 @@ open_settings() {
 }
 
 # ==========================================================================
-printf '\n%s  nisos%s -- offline bilingual voice assistant\n' "$B" "$R"
-printf '  %s~50 minutes. Walk away -- nothing asks you anything until the end.%s\n' "$DIM" "$R"
+if [ "${NISOS_ONLINE:-0}" = "1" ]; then
+  printf '\n%s  nisos%s -- bilingual voice assistant, online brain\n' "$B" "$R"
+  printf '  %s~15 minutes. No local model: reasoning goes to the Claude API.%s\n' "$DIM" "$R"
+else
+  printf '\n%s  nisos%s -- offline bilingual voice assistant\n' "$B" "$R"
+  printf '  %s~50 minutes. Walk away -- nothing asks you anything until the end.%s\n' "$DIM" "$R"
+fi
 printf '  %sSafe to interrupt and re-run: it resumes where it stopped.%s\n' "$DIM" "$R"
 
 # ==========================================================================
@@ -377,6 +392,34 @@ else
   else
     warn "no model yet, skipping"
   fi
+fi
+
+# ==========================================================================
+# The one paste. Deliberately here rather than twenty minutes in: the whole
+# ordering of this script is "do the slow work unattended, ask at the end".
+# ==========================================================================
+step "Online brain"
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  ok "using the key in ANTHROPIC_API_KEY"
+elif [ -s "$STATE_DIR/anthropic-key" ]; then
+  skip "key already stored"
+elif [ "${NISOS_ONLINE:-0}" = "1" ] || [ -z "$(find "$MODELS" -name '*.gguf' -size +100M 2>/dev/null | head -1)" ]; then
+  # Either they asked for online, or there is no local model -- in both cases
+  # the reasoned path has nothing to think with until a key exists.
+  printf '     %sPhrases the router misses need a brain. With no local model,%s\n' "$DIM" "$R"
+  printf '     %sthat means the Claude API -- get a key at%s\n' "$DIM" "$R"
+  printf '     %shttps://console.anthropic.com/settings/keys%s\n\n' "$ACC" "$R"
+  printf '     Paste it here (hidden), or press Enter to skip: '
+  read -rs BOOTSTRAP_KEY </dev/tty
+  printf '\n'
+  if [ -n "$BOOTSTRAP_KEY" ]; then
+    printf '%s\n' "$BOOTSTRAP_KEY" | python -m nisos --set-key
+  else
+    warn "no key -- routed commands will work, reasoned ones won't until you add one (menu key 'k')"
+  fi
+  unset BOOTSTRAP_KEY
+else
+  skip "local model present -- add a key later with menu key 'k' to go online"
 fi
 
 # ==========================================================================

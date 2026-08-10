@@ -404,8 +404,12 @@
   function refresh() {
     if (!alive) return;
     api("status").then(function (s) {
-      pModel.textContent = s.model_running ? "model ready" : "model stopped";
-      pModel.className = "pill " + (s.model_running ? "on" : "off");
+      // The server decides the wording -- it is the only side that knows
+      // whether this install thinks on the phone or over the network.
+      var b = s.brain || { ready: s.model_running,
+                           label: s.model_running ? "model ready" : "model stopped" };
+      pModel.textContent = b.label;
+      pModel.className = "pill " + (b.ready ? "on" : "off");
       pLang.textContent = s.language;
       pLang.className = "pill off";
       if (s.dry_run) { pLang.textContent = "dry run"; pLang.className = "pill warn"; }

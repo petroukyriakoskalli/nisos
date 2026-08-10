@@ -133,6 +133,26 @@ class AppState:
         """True if llama-server is answering."""
         return brain.available(self.config.get_path("brain.url"), timeout=1.0)
 
+    def brain_status(self) -> dict:
+        """Which brain a turn would use, and whether it can answer right now.
+
+        The wording lives here rather than in the page so there is one place
+        that decides what "ready" is called. The online check is deliberately
+        only "is there a key" -- the page polls this every few seconds, and a
+        network round trip per poll would spend battery to tell you something
+        the next turn is about to find out anyway.
+        """
+        from . import cloud
+
+        backend = brain.backend_for(self.config)
+        if backend == "claude":
+            ready = cloud.available(self.config)
+            return {"backend": "claude", "ready": ready,
+                    "label": "online" if ready else "no key"}
+        ready = self.model_running()
+        return {"backend": "llama", "ready": ready,
+                "label": "model ready" if ready else "model stopped"}
+
     def stop_model(self) -> bool:
         """Kill llama-server and release the wake lock.
 
@@ -387,9 +407,13 @@ class Handler(BaseHTTPRequestHandler):
         """Everything the status board shows."""
         self.state.touch()
         from . import __version__
+        brain_status = self.state.brain_status()
         self._json(200, {
             "version": __version__,
-            "model_running": self.state.model_running(),
+            "brain": brain_status,
+            # Kept for a page cached from an older release, which would
+            # otherwise show "model stopped" forever on an online install.
+            "model_running": brain_status["ready"],
             "language": self.state.config.get_path("general.language", "en"),
             "dry_run": bool(self.state.config.get_path("general.dry_run", False)),
             "actions": actions_module.action_names(),

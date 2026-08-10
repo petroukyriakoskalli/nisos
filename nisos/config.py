@@ -52,11 +52,35 @@ DEFAULTS: dict[str, Any] = {
         "whisper_timeout": 20.0,
     },
     "brain": {
+        # claude -- the Anthropic API. Nothing to install, far better model,
+        #           needs a network and sends the transcript off the phone.
+        # llama  -- llama-server on localhost. Private and free per turn.
+        # auto   -- claude when a key is present, else llama (default).
+        "backend": "auto",
+
+        # -- llama-server (offline) --
         "url": "http://127.0.0.1:8080",
         "grammar": "grammar/action.gbnf",
         "timeout": 40.0,
         "max_tokens": 128,
         "temperature": 0.2,
+
+        # -- Claude API (online) -- see nisos/cloud.py for why each of these
+        # is what it is. The key is NOT here on purpose; it lives in its own
+        # 0600 file so it never ends up pasted into a bug report.
+        "cloud": {
+            "model": "claude-opus-5",
+            "key_file": "~/.nisos/anthropic-key",
+            # Caps thinking and reply together. A cap is not a charge.
+            "max_tokens": 2048,
+            # Classifying one spoken sentence, with somebody waiting.
+            "effort": "low",
+            # adaptive | off. Leave it on -- see cloud._payload.
+            "thinking": "adaptive",
+            # Retry a safety-declined request on another model. "" disables.
+            "fallbacks": "default",
+            "timeout": 30.0,
+        },
     },
     "speech": {
         "engine": "android",   # android | piper

@@ -102,6 +102,58 @@ class TestReasonedTurns:
         assert turn.action == "unavailable"
         assert turn.spoken == "Αυτό δεν γίνεται χωρίς σύνδεση."
 
+    @staticmethod
+    def _brain_raises_with(monkeypatch, reply_key):
+        from nisos.brain import BrainError
+
+        def down(*args, **kwargs):
+            raise BrainError("nope", reply_key=reply_key)
+
+        monkeypatch.setattr(loop.brain, "think", down)
+
+    def test_a_missing_key_blames_the_key_not_the_network(self, cfg, monkeypatch,
+                                                         silence):
+        """Four failures used to share one apology. This is the online one:
+        nothing is down, there is simply nothing to authenticate with."""
+        self._brain_raises_with(monkeypatch, "no_key")
+        turn = loop.handle("summarise this", cfg, RecordingContext(),
+                           language_hint="el")
+        assert turn.action == "no_key"
+        assert "κλειδί" in turn.spoken
+
+    def test_a_refusal_is_not_dressed_up_as_a_fault(self, cfg, monkeypatch,
+                                                    silence):
+        self._brain_raises_with(monkeypatch, "refused")
+        turn = loop.handle("summarise this", cfg, RecordingContext(),
+                           language_hint="el")
+        assert turn.action == "refused"
+        assert turn.spoken == "Το μοντέλο αρνήθηκε να απαντήσει."
+
+    def test_a_keyed_failure_never_probes_llama(self, cfg, monkeypatch, silence):
+        """The probe is a 1s HTTP timeout. Paying it to answer a question we
+        already know the answer to would add a second of silence to a failure."""
+        self._brain_raises_with(monkeypatch, "no_key")
+
+        def fail(*args, **kwargs):
+            raise AssertionError("probed llama-server for a known failure")
+
+        monkeypatch.setattr(loop.brain, "available", fail)
+        loop.handle("summarise this", cfg, RecordingContext())
+
+    def test_the_log_line_says_which_brain_answered(self, cfg, monkeypatch,
+                                                    silence):
+        from nisos.brain import Decision
+
+        monkeypatch.setattr(
+            loop.brain, "think",
+            lambda text, language, actions, config, **kw:
+                Decision("answer", {"text": "Το Τόκιο."}, 1.4, backend="claude"),
+        )
+        turn = loop.handle("ποια είναι η πρωτεύουσα της Ιαπωνίας", cfg,
+                           RecordingContext(), language_hint="el")
+        assert turn.backend == "claude"
+        assert "reasoned:claude" in turn.summary()
+
 
 class TestTiming:
     def test_routed_turn_records_its_stages(self, cfg, silence):

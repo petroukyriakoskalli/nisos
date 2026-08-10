@@ -99,9 +99,22 @@ SAY: dict[str, dict[str, str]] = {
         "en": "Didn't catch that.",
         "el": "Δεν το έπιασα.",
     },
+    # Said when the phrase needed a model and the network is what failed --
+    # which, with the online brain, is now the literal truth.
     "unavailable": {
         "en": "Can't do that offline.",
         "el": "Αυτό δεν γίνεται χωρίς σύνδεση.",
+    },
+    # The online brain, with no key to use it. Actionable: menu key 'k'.
+    "no_key": {
+        "en": "There's no API key, so I can only do the quick commands.",
+        "el": "Λείπει το κλειδί, οπότε κάνω μόνο τις γρήγορες εντολές.",
+    },
+    # A successful call that declined to answer. Rare, and worth saying plainly
+    # rather than dressing up as a fault -- nothing is broken.
+    "refused": {
+        "en": "The model wouldn't answer that one.",
+        "el": "Το μοντέλο αρνήθηκε να απαντήσει.",
     },
     # Distinct from "unavailable" on purpose. This one is not about the
     # network at all -- the phrase missed the router and llama-server is not

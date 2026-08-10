@@ -1,23 +1,40 @@
 """The language model -- called only when the router misses.
 
-Talks to a ``llama-server`` running on localhost over plain HTTP, using nothing
-but the standard library. That is deliberate: this program has no pip
-dependencies at all, so installing it in Termux never involves compiling a
-wheel against a missing header at eleven at night.
+Two backends, one :class:`Decision` out. :func:`think` picks between them and
+everything upstream is none the wiser:
 
-The important part is the **grammar**. Small models improvise; ask a 4B for
-JSON a hundred times and you will get several replies wrapped in a friendly
-sentence. llama.cpp can constrain generation token by token against a GBNF
-grammar, which makes malformed output impossible rather than unlikely. That
-single flag takes tool-calling from roughly 70% reliable to essentially
-perfect, and it is why ``grammar/action.gbnf`` is worth keeping in step with
-the action registry.
+* **llama** -- a ``llama-server`` on localhost. No network, no account, no
+  per-turn cost; a 4B model and 2.5 GB of storage.
+* **claude** -- the Anthropic API, in :mod:`nisos.cloud`. Nothing to install
+  and a far better model; needs a network, a key, and sends the transcript off
+  the phone.
+
+``brain.backend`` chooses: ``claude``, ``llama``, or ``auto`` (the default --
+online when a key is present, dropping to llama-server if the network is gone
+and it happens to be running). Either way the router still answers ~80% of
+commands on the phone with no model involved at all, so what leaves the device
+is the minority of phrases that miss it.
+
+Both talk plain HTTP with nothing but the standard library. That is deliberate:
+this program has no pip dependencies at all, so installing it in Termux never
+involves compiling a wheel against a missing header at eleven at night.
+
+The important part is that neither backend is allowed to improvise
+--------------------------------------------------------------
+Small models improvise; ask a 4B for JSON a hundred times and you will get
+several replies wrapped in a friendly sentence. llama.cpp can constrain
+generation token by token against a GBNF grammar, which makes malformed output
+impossible rather than unlikely -- that single flag takes tool-calling from
+roughly 70% reliable to essentially perfect, and it is why
+``grammar/action.gbnf`` is worth keeping in step with the action registry. The
+API's equivalent is a forced ``tool_choice``; see :mod:`nisos.cloud`.
 
 Extending
 ---------
-:func:`build_prompt` is where you teach the model new tricks. Keep it short --
-every token in the system prompt is paid for on every reasoned request, and
-Greek costs two to three times more tokens per word than English.
+:func:`build_prompt` is where you teach the local model new tricks (its online
+counterpart is :func:`nisos.cloud.build_system`). Keep it short -- every token
+in the system prompt is paid for on every reasoned request, and Greek costs two
+to three times more tokens per word than English.
 """
 
 from __future__ import annotations
@@ -30,14 +47,31 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["Decision", "BrainError", "think", "build_prompt", "load_grammar",
-           "available"]
+__all__ = ["Decision", "BrainError", "think", "think_llama", "backend_for",
+           "build_prompt", "load_grammar", "available"]
 
 log = logging.getLogger(__name__)
 
+#: Everything ``brain.backend`` accepts. Anything else is treated as ``auto``
+#: with a warning, because a typo here should not take the assistant down.
+BACKENDS = ("auto", "claude", "llama")
+
 
 class BrainError(Exception):
-    """The model was unreachable or unintelligible."""
+    """The model was unreachable or unintelligible.
+
+    Attributes:
+        reply_key: Which entry in :data:`nisos.replies.SAY` describes this
+            failure, when the raiser knows. "No API key" and "rate limited"
+            and "the local model isn't running" are three different things to
+            be told, and one apology for all of them sends you looking in the
+            wrong place -- which is exactly the bug that put ``no_model`` in
+            the reply table. None means "caller, work it out".
+    """
+
+    def __init__(self, message: str, reply_key: str | None = None):
+        super().__init__(message)
+        self.reply_key = reply_key
 
 
 @dataclass
@@ -49,11 +83,14 @@ class Decision:
             wants to say something, or ``"unclear"`` when it could not tell.
         args: Arguments for the action.
         seconds: How long the round trip took.
+        backend: Which brain answered -- ``"llama"`` or ``"claude"``. Ends up
+            in the log line, so a slow turn can be blamed on the right thing.
     """
 
     action: str
     args: dict
     seconds: float = 0.0
+    backend: str = "llama"
 
 
 LANGUAGE_NAMES = {"el": "Greek", "en": "English"}
@@ -137,9 +174,74 @@ def available(url: str, timeout: float = 1.0) -> bool:
         return False
 
 
+def backend_for(config) -> str:
+    """Which brain a turn would use right now: ``"claude"`` or ``"llama"``.
+
+    Resolves ``auto`` -- the default -- to ``claude`` when a key is available
+    and ``llama`` otherwise. Note this checks for a *key*, not for a network:
+    probing the network before every turn would cost a round trip on the path
+    where somebody is standing there waiting. The network is discovered by
+    trying, and :func:`think` handles the miss.
+    """
+    from . import cloud
+
+    choice = str(config.get_path("brain.backend", "auto") or "auto").lower()
+    if choice not in BACKENDS:
+        log.warning("Unknown brain.backend %r -- treating it as 'auto'. "
+                    "Valid values: %s", choice, ", ".join(BACKENDS))
+        choice = "auto"
+
+    if choice == "auto":
+        return "claude" if cloud.available(config) else "llama"
+    return choice
+
+
 def think(text: str, language: str, actions: list[str], config,
           memories: dict[str, str] | None = None) -> Decision:
-    """Ask the model what to do.
+    """Ask whichever brain is configured what to do.
+
+    Args:
+        text: The transcript.
+        language: Which language to answer in.
+        actions: Registered action names.
+        config: A :class:`nisos.config.Config`.
+        memories: Anything stored that looks relevant to this utterance.
+
+    Returns:
+        A :class:`Decision`.
+
+    Raises:
+        BrainError: When the chosen brain could not be reached or used.
+
+    On ``auto``, an online failure falls through to llama-server *only if it is
+    actually running* -- starting a 2.5 GB model from inside a turn somebody is
+    waiting on would be worse than admitting the network is down. If it isn't
+    running, the original online failure is what gets raised, because that is
+    the one the user can do something about.
+    """
+    from . import cloud
+
+    backend = backend_for(config)
+
+    if backend == "llama":
+        return think_llama(text, language, actions, config, memories=memories)
+
+    try:
+        return cloud.think(text, language, actions, config, memories=memories)
+    except BrainError as exc:
+        explicit = str(config.get_path("brain.backend", "auto") or "auto").lower()
+        if explicit == "claude":
+            raise
+        if not available(config.get_path("brain.url"), timeout=1.0):
+            raise
+        log.warning("Online brain failed (%s) -- falling back to llama-server",
+                    exc)
+        return think_llama(text, language, actions, config, memories=memories)
+
+
+def think_llama(text: str, language: str, actions: list[str], config,
+                memories: dict[str, str] | None = None) -> Decision:
+    """Ask the local llama-server what to do.
 
     Args:
         text: The transcript.
@@ -185,7 +287,8 @@ def think(text: str, language: str, actions: list[str], config,
     except urllib.error.URLError as exc:
         raise BrainError(
             f"llama-server unreachable at {url} -- is it running, and did "
-            f"Android suspend it? (termux-wake-lock)"
+            f"Android suspend it? (termux-wake-lock)",
+            reply_key="no_model",
         ) from exc
     except (json.JSONDecodeError, OSError) as exc:
         raise BrainError(f"llama-server gave an unreadable response: {exc}") from exc

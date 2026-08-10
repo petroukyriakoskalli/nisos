@@ -95,8 +95,19 @@ be phrased as `"{percent} percent left."`
 ### 4. If the model should be able to choose it too — `grammar/action.gbnf`
 
 Add the name to the `verb` rule. Actions missing from the grammar are still
-reachable by the router, they just can't be picked by the model — which is
+reachable by the router, they just can't be picked by the local model — which is
 sometimes exactly what you want for anything destructive.
+
+**The online brain needs no edit here.** Its equivalent of the grammar is the
+`action` enum in `nisos/cloud.py`'s tool schema, generated from the registry, so
+a new action is offered to Claude the moment it is registered.
+
+That asymmetry matters if you ever want an action the model can't choose.
+Leaving it out of `action.gbnf` hides it from llama-server (and fails
+`test_grammar_matches_registry`, which is the point — the two are meant to stay
+in step), but it would *not* hide it from the API, because that enum is derived
+rather than written. The clean way to keep something out of both brains is to
+keep it out of the registry entirely and reach it from the router alone.
 
 ### Then
 
@@ -137,12 +148,42 @@ satisfy the router, wins.
 Write `_speak_<name>` in `nisos/speech.py` and list it in `speak()`. Take text
 and a language, block until spoken.
 
+## Adding a brain
+
+`nisos/brain.py` is the dispatcher; `think()` is the only function the loop
+knows about. A third backend is a module with one function of the same shape:
+
+```python
+def think(text, language, actions, config, memories=None) -> Decision
+```
+
+Return a `Decision`, and set its `backend` so the log line tells the truth.
+Raise `BrainError` on anything else, with a `reply_key` when you know which
+entry in `nisos.replies.SAY` describes the failure — that is what turns "it
+didn't work" into "there's no key". Then add the name to `BACKENDS` and one
+branch in `backend_for()`.
+
+Two things the existing backends both do, and a new one should:
+
+- **Constrain the output rather than parsing it.** llama-server gets a GBNF
+  grammar, the API gets a forced `tool_choice`. Both make a malformed action
+  impossible instead of unlikely, which is worth more than any amount of
+  defensive parsing on the way back.
+- **Never let a diagnostic get swallowed.** Include what the other side actually
+  said — HTTP status, error body, all of it. Suppressing that has cost this
+  project a diagnosis three separate times.
+
 ## Things worth knowing before you change them
 
 **Keep action names English.** In both languages, always. This is the single
 load-bearing decision in the design — it means a 4B model only ever has to
 *classify* Greek, never write it, and the grammar makes English names the only
-legal output. There's a test asserting it.
+legal output. There's a test asserting it, on both brains.
+
+**The key is not a config setting.** It lives in its own 0600 file because
+`config.toml` is a thing people paste into bug reports. If you add another
+credential, do the same: `cloud.store_key` is the pattern, and the chmod is the
+reason it is Python and not an `echo`.
 
 **Keep the two route tables symmetric.** If an action is reachable in English
 but not Greek, the assistant is cleverer in one language than the other and you

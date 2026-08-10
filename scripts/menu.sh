@@ -52,6 +52,33 @@ model_file() {
   find "$MODELS" -name '*.gguf' -size +100M 2>/dev/null | head -1
 }
 
+key_present() {
+  # True if there is an Anthropic key to use. Checks the default location only
+  # -- if you moved brain.cloud.key_file, this line of the board will be wrong
+  # while the assistant itself is right. `python -m nisos --check` is the
+  # authority.
+  [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -s "$STATE_DIR/anthropic-key" ]
+}
+
+configured_backend() {
+  # The literal brain.backend from config.toml, or empty for "not set".
+  # `backend` appears in exactly one table, so a plain sed is enough -- same
+  # trade-off as app_mode_state below, and for the same reason.
+  sed -n 's/^[[:space:]]*backend[[:space:]]*=[[:space:]]*"\([a-z]*\)".*/\1/p' \
+    "${NISOS_CONFIG:-$HOME/.nisos/config.toml}" 2>/dev/null | head -1
+}
+
+brain_state() {
+  # "claude" or "llama" -- the same rule brain.backend_for() applies, done in
+  # shell because this runs on every redraw and starting Python to draw a
+  # status line is felt on a phone.
+  local pinned; pinned="$(configured_backend)"
+  case "$pinned" in
+    claude|llama) printf '%s' "$pinned"; return ;;
+  esac
+  key_present && printf 'claude' || printf 'llama'
+}
+
 app_mode_state() {
   # "on" when the UI server is configured to outlive the page. Grep rather
   # than shelling out to app-mode.sh: this runs on every redraw.
@@ -86,8 +113,25 @@ have() { command -v "$1" >/dev/null 2>&1; }
 draw_header() {
   # Print the banner and a live readout of every moving part.
   clear
-  printf '\n  %s%s nisos %s  %soffline · ελληνικά + english%s\n' "$CYN" "$B" "$R" "$D" "$R"
+  local mode; [ "$(brain_state)" = "claude" ] && mode="online" || mode="offline"
+  printf '\n  %s%s nisos %s  %s%s · ελληνικά + english%s\n' \
+    "$CYN" "$B" "$R" "$D" "$mode" "$R"
   printf '  %s─────────────────────────────────────────%s\n\n' "$D" "$R"
+
+  # Brain -- who answers a phrase the router misses. The line above is a mode,
+  # this is the reason for it.
+  if [ "$mode" = "online" ]; then
+    if key_present; then
+      printf '   %s  brain      %sonline%s        %sClaude API%s\n' \
+        "$DOT_OK" "$GRN" "$R" "$D" "$R"
+    else
+      printf '   %s  brain      %sonline, no key%s %s— press k%s\n' \
+        "$DOT_NO" "$RED" "$R" "$D" "$R"
+    fi
+  else
+    printf '   %s  brain      %son the phone%s   %sllama-server%s\n' \
+      "$DOT_OK" "$GRN" "$R" "$D" "$R"
+  fi
 
   # Model
   local mf; mf="$(model_file)"
@@ -246,6 +290,62 @@ act_actions() {
   pause
 }
 
+brain_label() {
+  # How the menu line describes the current brain.
+  [ "$(brain_state)" = "claude" ] && printf 'online' || printf 'on the phone'
+}
+
+_store_key() {
+  # Read a key with the echo off and hand it to Python on **stdin**. Never as
+  # an argument: arguments are visible in `ps` and land in the history file,
+  # and Python is where the 0600 chmod and the check live.
+  printf '  Paste the key (hidden), then Enter:\n  > '
+  local key; read -rs key </dev/tty; printf '\n\n'
+  if [ -z "$key" ]; then
+    printf '  nothing pasted -- left alone\n'
+    return
+  fi
+  printf '%s\n' "$key" | python -m nisos --set-key
+}
+
+act_key() {
+  # Set, replace or delete the Anthropic API key -- the one thing standing
+  # between a fresh install and the online brain.
+  printf '\n'
+  local pinned; pinned="$(configured_backend)"
+
+  if key_present; then
+    if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+      printf '  A key is set in ANTHROPIC_API_KEY (it wins over the file).\n\n'
+    else
+      printf '  A key is stored in %s.\n\n' "$STATE_DIR/anthropic-key"
+    fi
+    printf '  %sr%s replace   %sd%s delete   Enter to leave it alone: ' \
+      "$B" "$R" "$B" "$R"
+    read -r what </dev/tty
+    printf '\n'
+    case "$what" in
+      d|D) python -m nisos --forget-key ;;
+      r|R) _store_key ;;
+      *)   printf '  left alone\n' ;;
+    esac
+  else
+    printf '  %sNo key stored.%s With one, phrases the router misses go to the\n' \
+      "$B" "$R"
+    printf '  Claude API instead of the local model -- better answers, no 2.5 GB\n'
+    printf '  download, and the transcript leaves the phone. Get a key at\n'
+    printf '  %shttps://console.anthropic.com/settings/keys%s\n\n' "$D" "$R"
+    _store_key
+  fi
+
+  if [ "$pinned" = "llama" ]; then
+    printf '\n  %sNote:%s config.toml pins backend = "llama", so a key is not used\n' \
+      "$YEL" "$R"
+    printf '  until you change that to "auto" or "claude".\n'
+  fi
+  pause
+}
+
 act_install() {
   # Run the installer. Resumable, so this doubles as 'repair'.
   printf '\n'
@@ -308,6 +408,7 @@ main() {
    ${B}3${R}  Type a command
    ${B}4${R}  What can it do?
 
+   ${B}k${R}  Online brain ${D}(API key)${R}          ${D}$(brain_label)${R}
    ${B}5${R}  Start / restart the model
    ${B}6${R}  Stop the model
    ${B}7${R}  Diagnostics
@@ -330,6 +431,7 @@ EOF
       2) act_listen ;;
       3) act_type ;;
       4) act_actions ;;
+      k|K) act_key ;;
       5) act_start ;;
       6) act_stop ;;
       7) act_check ;;

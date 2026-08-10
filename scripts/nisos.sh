@@ -30,17 +30,29 @@ trap release_lock EXIT INT TERM
 termux-wake-lock >/dev/null 2>&1 || true
 
 if ! curl -sf --max-time 1 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
-  echo "$(date '+%H:%M:%S')  starting llama-server" >> "$HOME/.nisos/nisos.log"
-  nohup "$NISOS_HOME/bin/llama-server" \
-        -m "$MODEL" --port "$PORT" -t "$THREADS" -c "$CONTEXT" \
-        >> "$HOME/.nisos/llama.log" 2>&1 &
+  # Ask which brain this install uses before loading anything. It costs one
+  # Python start, and only on this branch -- where the alternative is spending
+  # nine seconds and 2.5 GB of RAM on a model the online backend never calls.
+  # When llama-server is already up the curl above short-circuits and none of
+  # this runs, so the common path is unchanged.
+  BRAIN="$(python -m nisos --print-backend 2>/dev/null || echo llama)"
 
-  # Wait for it, but not forever -- the router path works without the model,
-  # so a slow start should not block "torch on".
-  for _ in $(seq 1 30); do
-    curl -sf --max-time 1 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break
-    sleep 0.5
-  done
+  if [ "$BRAIN" = "claude" ]; then
+    echo "$(date '+%H:%M:%S')  brain=claude -- not starting llama-server" \
+      >> "$HOME/.nisos/nisos.log"
+  else
+    echo "$(date '+%H:%M:%S')  starting llama-server" >> "$HOME/.nisos/nisos.log"
+    nohup "$NISOS_HOME/bin/llama-server" \
+          -m "$MODEL" --port "$PORT" -t "$THREADS" -c "$CONTEXT" \
+          >> "$HOME/.nisos/llama.log" 2>&1 &
+
+    # Wait for it, but not forever -- the router path works without the model,
+    # so a slow start should not block "torch on".
+    for _ in $(seq 1 30); do
+      curl -sf --max-time 1 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break
+      sleep 0.5
+    done
+  fi
 fi
 
 # --------------------------------------------------------------------------

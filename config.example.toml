@@ -37,11 +37,64 @@ whisper_timeout = 20.0
 
 
 [brain]
+# Who answers a phrase the router missed.
+#
+#   claude  the Anthropic API. Nothing to install, far better answers, and
+#           much better Greek. Needs a network and a key, costs per turn, and
+#           the transcript leaves the phone.
+#   llama   llama-server on this device. Private, free per turn, 2.5 GB.
+#   auto    claude when a key is present, otherwise llama. This is the default,
+#           and on a lost network it drops back to llama-server if it happens
+#           to be running.
+#
+# Either way the router still answers ~80% of commands here, with no model of
+# any kind involved -- "άναψε τον φακό" never leaves the phone.
+backend = "auto"
+
+# -- llama-server (offline) ------------------------------------------------
 url         = "http://127.0.0.1:8080"
 grammar     = "grammar/action.gbnf"
 timeout     = 40.0
 max_tokens  = 128
-temperature = 0.2
+temperature = 0.2   # llama only; the API rejects sampling parameters
+
+
+# -- Claude API (online) ---------------------------------------------------
+[brain.cloud]
+# There is deliberately NO key setting here. It lives in its own 0600 file, so
+# the config stays something you can paste into a bug report. Put one there
+# with:  python -m nisos --set-key   (or menu key 'k')
+key_file = "~/.nisos/anthropic-key"
+
+model = "claude-opus-5"
+
+# Caps thinking and reply together. A cap is not a charge -- only the tokens
+# actually produced are billed -- so being generous here costs nothing and
+# stops a long answer being cut off mid-sentence.
+max_tokens = 2048
+
+# low | medium | high | xhigh | max. Classifying one spoken sentence is the
+# textbook case for "low", and this runs while you stand there holding a phone.
+# Raise it if you ask it real questions and want better answers.
+effort = "low"
+
+# adaptive | off. Leave it on: with thinking off the model occasionally writes
+# its tool call as ordinary text, and a command that silently does nothing is
+# the worst failure this program has.
+thinking = "adaptive"
+
+# Retry on another model if the safety filters decline a request. "" disables
+# it -- do that if you ever see an HTTP 400 mentioning fallbacks or a beta
+# header, which would mean the model in use doesn't take this.
+fallbacks = "default"
+
+timeout = 30.0
+
+# ⚠️ If you point `model` at an older model (Haiku 4.5, for instance) you must
+# also clear `effort` and `thinking` -- those models reject both, and every
+# reasoned turn would fail with an HTTP 400.
+#   effort   = ""
+#   thinking = ""
 
 
 [speech]

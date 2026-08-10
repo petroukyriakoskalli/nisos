@@ -1,8 +1,8 @@
 # nisos
 
-An offline, bilingual voice assistant for Android. Greek and English, no
-network, no API keys, no account. Built for a Galaxy S25 Ultra running Termux,
-but nothing here is Samsung-specific beyond the back-tap trigger.
+A bilingual voice assistant for Android. Greek and English, built for a Galaxy
+S25 Ultra running Termux, but nothing here is Samsung-specific beyond the
+back-tap trigger.
 
 ```
 you:    «βάλε χρονόμετρο δώδεκα λεπτά και άναψε τον φακό»
@@ -10,6 +10,11 @@ nisos:  timer.set {"minutes": 12}   torch.on {}
 nisos:  «Δώδεκα λεπτά, και ο φακός άναψε.»
         1.02 s   ·   net bytes: 0
 ```
+
+Every command it can name is heard, decided and acted on **on the phone** — the
+turn above is the common case, and it sends nothing anywhere. Reasoning is the
+one part that can leave: a phrase the router doesn't recognise goes either to a
+local model or to the Claude API, and [you choose which](#two-brains).
 
 ## How it works
 
@@ -40,6 +45,41 @@ works here because the alphabets are disjoint.
 anything the router catches, the Greek reply is a string you wrote yourself,
 so the fast path has no model involvement at all.
 
+## Two brains
+
+Only phrases the router misses reach a model at all. Which model is
+`brain.backend` in `config.toml`:
+
+| | `llama` | `claude` |
+|---|---|---|
+| Runs on | this phone | Anthropic's API |
+| Needs | 2.5 GB and a ~40 min install | a key and a network |
+| Per turn | free | costs tokens |
+| Transcript | never leaves the device | sent to the API |
+| Answers | a capable intern | far better, and much better Greek |
+| Works on a plane | yes | no |
+
+`auto` — the default — means online when a key is present, dropping back to
+llama-server if the network is gone *and* it happens to be running. Pin either
+name to remove the guessing.
+
+**What actually leaves the phone, online:** the transcript of a phrase the
+router missed, plus any stored facts that look relevant to it, plus the list of
+action names. Nothing else — not the audio, not your contacts, and nothing at
+all for a routed command. If that trade isn't one you want, set
+`backend = "llama"` and it behaves exactly as it did before v0.3.0.
+
+Going online:
+
+```bash
+python -m nisos --set-key      # paste it; stored 0600, never in config.toml
+python -m nisos --check        # proves the key, the network and the model name
+```
+
+or press `k` in the console menu. A fresh phone can skip the local model
+entirely with `NISOS_ONLINE=1 bash scripts/bootstrap.sh` — about 15 minutes
+instead of 50, and no 2.5 GB download.
+
 ## Requirements
 
 | Part | Where from | Notes |
@@ -47,14 +87,17 @@ so the fast path has no model involvement at all.
 | Termux | **F-Droid only** | The Play Store copy is a dead fork whose packages no longer resolve |
 | Termux:API | F-Droid, plus `pkg install termux-api` | Torch, SMS, clipboard, battery, speech |
 | Python 3.11+ | `pkg install python` | Uses `tomllib`, so 3.11 is the floor |
-| llama.cpp | Built locally | `llama-server` on `localhost:8080` |
+| An Anthropic API key | [console.anthropic.com](https://console.anthropic.com/settings/keys) | **Optional.** Only for the online brain — `python -m nisos --set-key` |
+| llama.cpp | Built locally | **Optional with the online brain.** `llama-server` on `localhost:8080` |
 | whisper.cpp | Built locally | **Multilingual** weights, not `.en` |
 | Tasker | Play Store, ~£3 | **Optional.** Only do-not-disturb, the calendar and button triggers need it — [tasker/](tasker/README.md) |
 | Greek offline packs | Settings → Google → Voice | Recognition *and* text-to-speech |
 
 There are **no pip dependencies**. The whole program runs on the standard
 library, so installing it in Termux never involves compiling a wheel against a
-missing header.
+missing header. That is also why the Claude API is called over plain `urllib`
+rather than with the official SDK: the SDK pulls in pydantic, whose core is
+Rust, and Termux has no prebuilt wheel for it.
 
 ## Install
 
@@ -73,6 +116,11 @@ curl -sL https://raw.githubusercontent.com/petroukyriakoskalli/nisos/main/script
 
 That's the whole install — full step-by-step in **[INSTALL.md](INSTALL.md)**.
 No account, no token, no ZIP.
+
+For the online brain, prefix it with `NISOS_ONLINE=1` — it then skips the 2.5 GB
+model download and asks for an API key at the end instead. About 15 minutes
+rather than 50. Everything below still applies; there is simply no local model
+to build a config around.
 
 It runs unattended and nothing asks you a question until it's finished. Paste
 it, put the phone down, come back to four taps.
@@ -170,23 +218,27 @@ long-press the home screen → **Widgets → Termux → "nisos-console"**.
 A text control panel — everything one keypress, no UI to go wrong:
 
 ```
-  nisos   offline · ελληνικά + english
+  nisos   online · ελληνικά + english
   ─────────────────────────────────────────
 
-   ●  model      ready    Qwen3-4B-Q4_K_M.gguf
+   ●  brain      online        Claude API
+   ●  model      stopped  Qwen3-4B-Q4_K_M.gguf
    ●  ears       android + whisper
    ●  voice      el-GR + en-GB
    ●  disk       3.1 GB used  · 212 GB free
 
-   1  Speak a command          5  Start / restart the model
-   2  Listen continuously      6  Stop the model
-   3  Type a command           7  Diagnostics
-   4  What can it do?          8  View log
+   1  Speak a command          k  Online brain (API key)
+   2  Listen continuously      5  Start / restart the model
+   3  Type a command           6  Stop the model
+   4  What can it do?          7  Diagnostics
 
    9  Install or repair        u  Check for updates
    c  Free up space            r  Roll back last update
    q  Quit
 ```
+
+The first line and the `brain` row track `brain.backend`, so a glance tells you
+whether the next hard question goes to the phone or to the network.
 
 Everything from there is a single keypress — no commands to remember, no
 typing on a phone keyboard. `nisos-speak` and `nisos-listen` are separate
@@ -246,22 +298,32 @@ Measured expectations on a Snapdragon 8 Elite, CPU inference, 6 threads.
 | Path | English | Greek |
 |---|---|---|
 | Routed — "torch on", «άναψε τον φακό» | ~1.0 s | ~1.0 s |
-| Reasoned — anything the router misses | ~3.2 s | ~3.5 s |
+| Reasoned, `llama` — anything the router misses | ~3.2 s | ~3.5 s |
+| Reasoned, `claude` | not yet measured on a phone | not yet measured |
 
 Greek costs nothing on the fast path, because those replies are strings you
 wrote. It only shows up on the reasoned path, where Qwen's tokeniser needs two
 to three times more tokens per Greek word.
 
+The online figures are deliberately blank rather than guessed. It runs at
+`effort = "low"` with thinking on, which is the right setting for classifying
+one spoken sentence, but the honest number is whatever your mobile connection
+does — and nobody has timed it on the phone yet.
+
 ## What it won't do
 
-- **It can't look anything up.** No weather, no news, no scores. Offline means
-  offline — the model is a language engine, not a knowledge base.
+- **It can't look anything up live.** No weather, no news, no scores. There is
+  no action that reaches the web, on either brain — the online brain answers
+  from what the model already knows, which is a different thing from being
+  current.
 - **A 4B model is a capable intern with no memory.** It will nail "remind me at
   six" and summarise a note. It will not reliably hold a three-step plan
-  together.
-- **Its Greek is worse than its English on the reasoned path.** Routed replies
-  are flawless because you wrote them; anything the model composes reads as
-  competent-foreigner Greek. Add routes rather than accepting that.
+  together. The online brain does not have this limitation; it has a bill
+  instead.
+- **Its Greek is worse than its English on the reasoned path** — on `llama`.
+  Routed replies are flawless because you wrote them; anything the local model
+  composes reads as competent-foreigner Greek. Add routes rather than accepting
+  that, or go online, where this mostly stops being true.
 - **Half-Greek half-English sentences trip it**, names especially. See the
   `[contacts]` alias table in `config.example.toml`.
 - **The NPU sits idle.** Qualcomm's Hexagon is only reachable through the QNN
@@ -279,9 +341,10 @@ to three times more tokens per Greek word.
 | `nisos/actions.py` | What it can do, and how it reaches Android |
 | `nisos/replies.py` | What it says back, in both languages |
 | `nisos/stt.py` | Racing Android's recogniser against Whisper |
-| `nisos/brain.py` | llama-server client, grammar-constrained |
+| `nisos/brain.py` | Which brain answers, and the llama-server client |
+| `nisos/cloud.py` | The Claude API client — one forced tool call |
 | `nisos/loop.py` | Orchestration — the only file that knows the order |
-| `grammar/action.gbnf` | Makes malformed model output impossible |
+| `grammar/action.gbnf` | Makes malformed local-model output impossible |
 
 See [EXTENDING.md](EXTENDING.md) for how to add a command. It's three small
 edits and the test suite tells you if you've missed one.
@@ -292,7 +355,7 @@ edits and the test suite tells you if you've missed one.
 python -m pytest -q
 ```
 
-81 tests, no phone required.
+197 tests, no phone and no network required — the API is stubbed.
 
 ## Licence
 

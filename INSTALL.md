@@ -64,6 +64,25 @@ down, come back to four taps.
 
 > ⚠️ **Stay on wi-fi.** The model download is 2.5 GB.
 
+### Or: skip the 2.5 GB model
+
+If you'd rather the hard thinking happened on Anthropic's servers than on your
+phone, paste this instead:
+
+```bash
+curl -sL https://raw.githubusercontent.com/petroukyriakoskalli/nisos/main/scripts/bootstrap.sh | NISOS_ONLINE=1 bash
+```
+
+Same install, minus the model: **~15 minutes instead of ~50, and no 2.5 GB
+download.** Near the end it asks you to paste an API key from
+[console.anthropic.com](https://console.anthropic.com/settings/keys) — that is
+the only extra question, and you can skip it and add one later.
+
+The trade: commands it recognises still never leave the phone, but a phrase it
+doesn't recognise is sent to the API, and each of those costs tokens. Answers
+are much better, and its Greek stops being the weak spot. You can change your
+mind either way afterwards — see step 4.
+
 ---
 
 ## 3 · Four taps it can't do for you
@@ -103,6 +122,29 @@ Now your voice:
 python -m nisos
 ```
 
+### Which brain is answering?
+
+```bash
+python -m nisos --check
+```
+
+The first line says `brain: claude` or `brain: llama`, and the rest only checks
+what that choice actually needs. Switching:
+
+```bash
+python -m nisos --set-key       # go online (paste the key; stored, not shown)
+python -m nisos --forget-key    # go back to the phone
+```
+
+Or press **`k`** in the control panel. To stop it deciding for itself, put
+`backend = "llama"` (or `"claude"`) under `[brain]` in `~/nisos/config.toml`.
+Try one phrase both ways before you decide:
+
+```bash
+python -m nisos --backend llama  --text "τι να μαγειρέψω με κοτόπουλο"
+python -m nisos --backend claude --text "τι να μαγειρέψω με κοτόπουλο"
+```
+
 ---
 
 ## 5 · Make it a home-screen icon
@@ -116,15 +158,16 @@ Tapping it opens the control panel:
   nisos   offline · ελληνικά + english
   ─────────────────────────────────────────
 
+   ●  brain      on the phone   llama-server
    ●  model      ready    Qwen3-4B-Q4_K_M.gguf
    ●  ears       android + whisper
    ●  voice      el-GR + en-GB
    ●  disk       3.1 GB used  · 212 GB free
 
-   1  Speak a command      5  Start / restart model
-   2  Listen continuously  6  Stop the model
-   3  Type a command       7  Diagnostics
-   4  What can it do?      8  View log
+   1  Speak a command      k  Online brain (API key)
+   2  Listen continuously  5  Start / restart model
+   3  Type a command       6  Stop the model
+   4  What can it do?      7  Diagnostics
 
    9  Install or repair    u  Check for updates
    c  Free up space        r  Roll back update
@@ -222,6 +265,11 @@ cd ~/nisos && python -m nisos --check
 | Do-not-disturb or calendar do nothing | Those two need Tasker. Run `bash ~/nisos/scripts/tasker-setup.sh`, then `scripts/tasker-test.sh` — it walks the links and stops at the broken one. See [tasker/README.md](tasker/README.md). Everything else, timer and volume included, works with Tasker uninstalled. |
 | Timer opens the clock app instead of just starting | Some clock apps ignore `SKIP_UI`. Harmless — the countdown still starts. |
 | Slow first command | Model reloading from storage. Hold a wake lock: `termux-wake-lock`. |
+| «Λείπει το κλειδί» / "there's no API key" | Online brain with no key. `python -m nisos --set-key`, or key **k** in the panel. |
+| «Αυτό δεν γίνεται χωρίς σύνδεση» on a good connection | Not the network — read the log line above it, which carries the API's own words. A rejected key says so; so does rate limiting. |
+| Every hard question fails, log shows `HTTP 400` | Something in the request the model doesn't accept. Set `fallbacks = ""` under `[brain.cloud]`, and if the message names `effort` or `thinking`, clear those too — older models reject both. |
+| Online, but it still loads the big model | `brain.backend` is `llama`, or there is no key. `python -m nisos --print-backend` says which brain it will use. |
+| Went online, want the 2.5 GB back | `python -m nisos --forget-key` (or set `backend = "llama"` to keep the key but not use it), then delete `~/nisos/models/*.gguf` once you're sure. |
 
 > ⚠️ **Expect a few rough edges.** No part of this has run on a real phone yet —
 > the logic is tested, the Android side isn't. If something misbehaves, run
@@ -237,6 +285,10 @@ Opt in during install and nisos checks once a day for a new release, then puts a
 normal Android notification on your phone with an **Install** button. Or press
 **u** in the control panel whenever you like.
 
-The check is the only thing in nisos that touches the network, it's off unless
-you say yes, nothing installs without you tapping Install, and **r** rolls back
-if a release misbehaves.
+Nothing installs without you tapping Install, and **r** rolls back if a release
+misbehaves.
+
+On the offline brain, that update check is the only thing in nisos that touches
+the network, and it's off unless you say yes. On the online brain there is one
+more: a phrase the router doesn't recognise is sent to the Claude API. Commands
+it does recognise still go nowhere.

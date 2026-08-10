@@ -1,5 +1,85 @@
 # Changelog
 
+## v0.3.0 — 2026-08-10
+
+### Added
+
+- **An online brain.** A phrase the router misses can now go to the Claude API
+  instead of the local 4B model. `brain.backend` chooses: `claude`, `llama`, or
+  `auto` — the new default, meaning online when a key is present and dropping
+  back to llama-server if the network is gone *and* it happens to be running.
+  Set `backend = "llama"` for exactly the old behaviour.
+
+  What this buys is answers that are actually good and Greek that is actually
+  Greek — the reasoned path's weakest point since the beginning. What it costs
+  is a network, a key, tokens per turn, and the transcript of an unrecognised
+  phrase leaving the phone. Routed commands are unaffected: ~80% of what you say
+  still never reaches a model of any kind, and «άναψε τον φακό» sends nothing
+  anywhere.
+
+  The online equivalent of the GBNF grammar is a **forced `tool_choice`**: one
+  tool whose input schema is the action object, and the model is required to
+  call it. Same guarantee reached a different way — it cannot answer in prose
+  and cannot invent a verb outside the enum, which is generated from the action
+  registry so a new action needs no second edit here. Raw `urllib`, not the
+  official SDK: the SDK needs pydantic, whose core is Rust, and Termux has no
+  wheel for it — the no-dependencies rule stands.
+
+- **`python -m nisos --set-key`** (and `--forget-key`), plus **`k`** in the
+  console menu. The key is read from **stdin**, never an argument — an argument
+  is visible in `ps` and lands in the history file — and stored 0600 in
+  `~/.nisos/anthropic-key`, deliberately not in `config.toml`, which is a file
+  you paste into bug reports. Storing it immediately checks it against
+  `GET /v1/models/<model>`, which validates the key, the network *and* the model
+  name at once, for free, without generating a token.
+
+- **`NISOS_ONLINE=1 bash scripts/bootstrap.sh`** — an install with no local
+  model: no 2.5 GB download, no waiting for one, and one paste for the key at
+  the end. About 15 minutes rather than 50. It reuses the existing
+  `NISOS_SKIP_MODEL` path rather than adding a second one, so resume behaves
+  exactly as before.
+
+- **`--print-backend`**, and `scripts/nisos.sh` now asks it before starting
+  anything. An online install no longer loads a 2.5 GB model on the first turn
+  after a reboot only to leave it idle. The check costs one Python start and is
+  paid *only* on the branch where llama-server isn't already answering, so the
+  common path is untouched.
+
+- **`--backend claude|llama|auto`** to override the config for one run, which is
+  how you compare the two on the same phrase.
+
+### Changed
+
+- **Four different failures used to share one apology.** "Can't do that
+  offline" was already wrong for a stopped llama-server (fixed in 0.2.5), and
+  the online brain adds two more: no key, and a request the API declined.
+  `BrainError` now carries the reply it deserves, so a missing key says «Λείπει
+  το κλειδί» instead of blaming a network with four bars — and the 1-second
+  llama probe is skipped entirely when the reason is already known.
+- **`--check` only checks what your configuration needs.** On an online install
+  there is no local model to find and no grammar to load, and a report that kept
+  demanding them would fail forever and teach you to ignore it. llama-server
+  shows as `[opt ]` there, because it is then only the fallback. Whisper rows
+  are skipped when `stt.strategy = "android"`.
+- The log line names which brain answered — `[reasoned:claude/el]`. "That took
+  four seconds" has different answers depending on where it went, and the log is
+  the only place you can tell afterwards.
+- The web UI's status pill and the console header say `online` / `on the phone`.
+  The wording is decided server-side, so exactly one place knows it.
+
+### Not verified
+
+- **No successful API call has been made from this checkout.** The endpoint,
+  headers and error handling are confirmed live — a real HTTP 401 came back from
+  `api.anthropic.com` with its message intact — but nobody has run a turn with a
+  valid key, so the request *body* is code-verified against the API
+  documentation only. The two opt-in parts (`fallbacks`, and
+  `thinking`/`effort`) are what would 400 if any of that is wrong; each clears
+  in one line, and an HTTP 400 now says so explicitly rather than leaving you to
+  find out.
+- Nothing here has run on the phone. Online timings are left blank in the README
+  rather than guessed.
+
 ## v0.2.6 — 2026-07-27
 
 ### Fixed

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -37,6 +38,16 @@ def build_parser() -> argparse.ArgumentParser:
                         help="log actions instead of performing them")
     parser.add_argument("--config", metavar="PATH",
                         help="path to config.toml")
+    parser.add_argument("--backend", choices=brain.BACKENDS,
+                        help="override brain.backend for this run")
+    parser.add_argument("--set-key", action="store_true",
+                        help="read an Anthropic API key from stdin and store "
+                             "it with 0600 permissions, then exit")
+    parser.add_argument("--forget-key", action="store_true",
+                        help="delete the stored Anthropic API key, then exit")
+    parser.add_argument("--print-backend", action="store_true",
+                        help="print which brain a turn would use "
+                             "(claude or llama), then exit")
     parser.add_argument("--check", action="store_true",
                         help="report what is installed and reachable, then exit")
     parser.add_argument("--actions", action="store_true",
@@ -79,30 +90,76 @@ def report_check(config) -> int:
 
     Written to be the first thing you run after installing, and the first thing
     you run when something has stopped working.
+
+    Only checks what the current configuration actually needs. That is the
+    point: on an online-only install there is no 2.5 GB model to find and no
+    grammar to load, and a report that keeps demanding them would fail forever
+    and teach you to ignore it. Rows marked ``opt`` are useful-if-present and
+    do not affect the exit code -- llama-server is one of those when the online
+    brain is in charge, because it is then only the fallback for a lost network.
     """
-    rows: list[tuple[str, bool, str]] = [
-        ("Termux:API (microphone)", __import__("nisos.audio", fromlist=["x"]).available(),
-         "pkg install termux-api + the F-Droid app"),
+    from . import cloud
+
+    backend = brain.backend_for(config)
+    configured = str(config.get_path("brain.backend", "auto"))
+    model = config.get_path("brain.cloud.model", "claude-opus-5")
+    uses_whisper = str(config.get_path("stt.strategy", "race")) != "android"
+
+    print()
+    print(f"  brain: {backend}"
+          + (f"  ({model})" if backend == "claude" else "  (llama-server)")
+          + (f"   [brain.backend = {configured}]" if configured != backend else ""))
+
+    # (name, ok, remedy, required)
+    rows: list[tuple[str, bool, str, bool]] = [
+        ("Termux:API (microphone)",
+         __import__("nisos.audio", fromlist=["x"]).available(),
+         "pkg install termux-api + the F-Droid app", True),
         ("Android recogniser", _binary("termux-speech-to-text"),
-         "pkg install termux-api"),
+         "pkg install termux-api", True),
         ("Android TTS", speech.available("android"),
-         "pkg install termux-api"),
-        ("whisper-cli", _path_or_binary(config.expanded("stt.whisper_bin")),
-         "build whisper.cpp -- see scripts/install.sh"),
-        ("Whisper weights (multilingual)",
-         _file(config.expanded("stt.whisper_model")),
-         "download-ggml-model.sh small-q5_1  (NOT small.en)"),
-        ("llama-server", brain.available(config.get_path("brain.url")),
-         "start it -- see README"),
-        ("Grammar file",
-         brain.load_grammar(config.get_path("brain.grammar")) is not None,
-         "grammar/action.gbnf is missing from the checkout"),
+         "pkg install termux-api", True),
     ]
 
-    width = max(len(name) for name, _, _ in rows)
+    if uses_whisper:
+        rows += [
+            ("whisper-cli", _path_or_binary(config.expanded("stt.whisper_bin")),
+             "build whisper.cpp -- see scripts/install.sh", True),
+            ("Whisper weights (multilingual)",
+             _file(config.expanded("stt.whisper_model")),
+             "download-ggml-model.sh small-q5_1  (NOT small.en)", True),
+        ]
+
+    if backend == "claude":
+        rows += [
+            ("Anthropic API key", cloud.available(config),
+             f"put one in {config.expanded('brain.cloud.key_file')} "
+             f"(python -m nisos --set-key), or set ANTHROPIC_API_KEY", True),
+            (f"Claude API reachable ({model})", cloud.reachable(config),
+             "checks the key, the network and the model name -- "
+             "see the log line above for which of them it was", True),
+            # Only the safety net now, so a miss is not a failure.
+            ("llama-server (offline fallback)",
+             brain.available(config.get_path("brain.url")),
+             "optional while online -- start it to keep working without a "
+             "network", False),
+        ]
+    else:
+        rows += [
+            ("llama-server", brain.available(config.get_path("brain.url")),
+             "start it -- see README", True),
+            ("Grammar file",
+             brain.load_grammar(config.get_path("brain.grammar")) is not None,
+             "grammar/action.gbnf is missing from the checkout", True),
+            ("Anthropic API key (online brain)", cloud.available(config),
+             "optional -- add one and set brain.backend = \"auto\" to use the "
+             "API instead", False),
+        ]
+
+    width = max(len(name) for name, _, _, _ in rows)
     print()
-    for name, ok, remedy in rows:
-        mark = "OK  " if ok else "MISS"
+    for name, ok, remedy, required in rows:
+        mark = "OK  " if ok else ("MISS" if required else "opt ")
         line = f"  [{mark}] {name.ljust(width)}"
         print(line if ok else f"{line}   -> {remedy}")
 
@@ -113,7 +170,7 @@ def report_check(config) -> int:
             print(f"    {action_name} ({language})")
 
     print()
-    return 0 if all(ok for _, ok, _ in rows) else 1
+    return 0 if all(ok for _, ok, _, required in rows if required) else 1
 
 
 def _binary(name: str) -> bool:
@@ -132,6 +189,58 @@ def _path_or_binary(path: str) -> bool:
     return _file(path) or _binary(path)
 
 
+def manage_key(config, forget: bool) -> int:
+    """Store or delete the API key. Returns a shell exit code.
+
+    The key is read from **stdin**, never from an argument. Anything on a
+    command line is visible in ``ps`` and lands in the shell history file, and
+    a credential that leaks that easily may as well be in the config.
+    """
+    path = config.expanded("brain.cloud.key_file")
+    if not path:
+        print("  brain.cloud.key_file is empty -- nowhere to put a key.")
+        return 1
+
+    if forget:
+        target = Path(path)
+        if target.exists():
+            target.unlink()
+            print(f"  removed {target}")
+        else:
+            print(f"  nothing stored at {target}")
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            print("  note: ANTHROPIC_API_KEY is still set in this environment "
+                  "and wins over the file.")
+        return 0
+
+    from . import cloud
+
+    if sys.stdin.isatty():
+        print("  Paste the key, then Enter:")
+    try:
+        key = sys.stdin.readline()
+    except KeyboardInterrupt:  # pragma: no cover -- interactive only
+        return 1
+
+    try:
+        target = cloud.store_key(key, path)
+    except ValueError:
+        print("  no key given -- nothing written")
+        return 1
+    except OSError as exc:
+        print(f"  could not write {path}: {exc}")
+        return 1
+
+    print(f"  stored in {target} (0600)")
+    print("  checking it...")
+    if cloud.reachable(config):
+        print(f"  OK -- {config.get_path('brain.cloud.model')} is reachable.")
+        return 0
+    print("  the key was stored but the check failed -- see the warning above "
+          "for whether that was the key, the network or the model name.")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the CLI. Returns a shell exit code."""
     args = build_parser().parse_args(argv)
@@ -139,8 +248,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         config.setdefault("general", {})["dry_run"] = True
+    if args.backend:
+        config.setdefault("brain", {})["backend"] = args.backend
 
     setup_logging(config, args.verbose)
+
+    if args.set_key or args.forget_key:
+        return manage_key(config, forget=args.forget_key)
+
+    if args.print_backend:
+        # One word on stdout, for scripts/nisos.sh to read. It uses this to
+        # decide whether to spend nine seconds loading a local model, so the
+        # answer has to come from the real config loader rather than a grep.
+        print(brain.backend_for(config))
+        return 0
 
     if args.actions:
         for name in actions_module.action_names():
