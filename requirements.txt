@@ -1,9 +1,0 @@
-# nisos has NO runtime dependencies. It runs on the Python 3.11 standard
-# library alone -- tomllib for config, urllib for llama-server, subprocess for
-# everything Android.
-#
-# That is deliberate. Installing this in Termux should never involve compiling
-# a wheel against a missing header at eleven at night.
-#
-# For development only:
-pytest>=7.0

@@ -65,9 +65,9 @@ android/  everything that touches the platform, in four files.
 ui/       Compose. The reactor, and one screen.
 ```
 
-| File | What lives there | Ported from |
+| File | What lives there | Was |
 |---|---|---|
-| `core/Normalise.kt` | Accents, final sigma, number words | `nisos/normalise.py` |
+| `core/Normalise.kt` | Accents, final sigma, number words | `nisos/normalise.py`, in Termux |
 | `core/When.kt` | «αύριο στις πέντε» → a real datetime | `nisos/when.py` |
 | `core/Router.kt` | The two regex tables — the fast path | `nisos/router.py` |
 | `core/Replies.kt` | What it says back, in both languages | `nisos/replies.py` |
@@ -80,8 +80,8 @@ ui/       Compose. The reactor, and one screen.
 | `ui/Reactor.kt` | The ring, drawn on a Canvas | `nisos/ui/index.html` |
 
 **The split is the point.** `core/` has no Android imports, which is what lets
-the router, the time parser and the reply tables be tested the way the Python
-was — no emulator, no phone, about a second. If you find yourself importing
+the router, the time parser and the reply tables be tested the way they were in
+Python — no emulator, no phone, about a second. If you find yourself importing
 `android.*` into `core/`, put it behind `Phone` instead.
 
 ## The voice
