@@ -1,0 +1,83 @@
+# Build the app and hand back an APK you can install.
+#
+# This workflow is the build machine. The app is developed on a laptop with no
+# Android SDK on it, so this is where the Kotlin actually gets compiled and
+# where a typo becomes a red X rather than a surprise on the phone.
+#
+# It runs the unit tests first, on purpose. Everything in `core/` -- the
+# router, the time parser, the reply tables -- is deliberately free of Android
+# imports and runs on a plain JVM in about a second, so there is no reason to
+# spend four minutes assembling an APK around logic that is already wrong.
+#
+# No Gradle wrapper is committed. A wrapper means a binary jar in a public
+# repository that nobody can read, and the alternative costs one line here.
+
+name: Android app
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "android/**"
+      - ".github/workflows/android-app.yml"
+  pull_request:
+    paths:
+      - "android/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      # The tests that matter, and the ones that can fail fast.
+      - name: Unit tests
+        run: gradle --no-daemon testDebugUnitTest
+
+      - name: Build the APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Report what came out
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk -name '*.apk' | head -1)
+          echo "  $APK"
+          ls -lh "$APK" | awk '{print "  size: " $5}'
+
+      # Debug-signed on purpose. This is sideloaded from here, not shipped
+      # through a store, so a release key would be ceremony with no benefit --
+      # and a signing secret in a public repository is a real cost.
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nisos-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload the test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: android/app/build/reports/tests/
+          if-no-files-found: ignore

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      A dark, chrome-free window. The Compose tree paints everything, so the
+      only job here is to stop a white flash between launch and first frame --
+      which on a black assistant is the most jarring thing the app could do.
+    -->
+    <style name="Theme.Nisos" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/nisos_background</item>
+        <item name="android:statusBarColor">@color/nisos_background</item>
+        <item name="android:navigationBarColor">@color/nisos_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

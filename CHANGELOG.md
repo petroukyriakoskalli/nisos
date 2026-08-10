@@ -1,5 +1,87 @@
 # Changelog
 
+## v0.5.0 — 2026-08-10 — an Android app
+
+### Added
+
+- **`android/` — nisos as an APK.** Same assistant, no Termux, no Tasker.
+
+  The online brain is what made this possible, and it is worth being precise
+  about why. Termux was never the design; it was the only way to run
+  llama.cpp and whisper.cpp on a phone. Every awkward thing about the install
+  traced back to those two binaries — the 2.5 GB download, the cross-compile
+  in CI, the fifty-minute setup. Send reasoning to the API and there is no
+  native code left; with no native code this is an ordinary app, and an
+  ordinary app can simply **ask for the permissions**.
+
+  That deletes the whole `tasker/` bridge in one go. `READ_CALENDAR` and
+  `WRITE_CALENDAR` are two lines in a manifest, and they replace: a broadcast,
+  a JavaScriptlet, an answer file on `/sdcard`, a polling loop, the
+  stale-answer trap, the `ok`-field handshake, and an entire class of failure
+  where Tasker silently was not running. `calendar.next` is a cursor.
+  `calendar.add` is an insert.
+
+- **`core/` has no Android imports anywhere.** That is the load-bearing rule of
+  the port: the router, the time parser, the reply tables and the action
+  registry all run in a plain JVM unit test in about a second, exactly as the
+  Python does. The platform lives behind one `Phone` interface, which the
+  tests replace with a recorder. Every assertion the Python suite makes about
+  routing, splitting, appointments and stitched replies is asserted again in
+  Kotlin — the tables were retyped into another language, and a regex that
+  quietly stopped matching would be invisible until you were standing in a
+  dark room asking for the torch.
+
+- **A voice with the right register.** Not a clone of a named actor — that
+  needs a model trained on their recordings, which is a large download and
+  somebody's likeness, and does not belong in a public repository. What it
+  does is pick Google's en-GB male voices (`en-gb-x-rjs`, `en-gb-x-gbb`),
+  pitch to 0.90 and slow to 0.96, which is most of what makes that delivery
+  recognisable. Local voices are preferred over network ones on purpose: the
+  network voices sound marginally better and add a round trip to every reply.
+  ⚠️ Greek gets the best `el-GR` voice available and sounds like a different
+  person, because it is one.
+
+- **A reactor HUD, drawn rather than shipped.** Arcs, a radial gradient and 72
+  ticks on a Canvas — no image assets, no animation library. The inner ring is
+  driven by the **actual microphone amplitude**, so it reacts to your voice
+  instead of playing a canned animation. Five states with distinct colours,
+  because "is it hearing me", "did it freeze" and "did that fail" are
+  different questions and a spinner answers none of them. Under the reply,
+  one chip per action — a turn can now do two things and a single spoken
+  sentence does not prove it did both.
+
+- **CI is the build machine.** `.github/workflows/android-app.yml` runs the
+  unit tests, assembles a debug APK and uploads it as an artifact. Debug-signed
+  deliberately: this is sideloaded, not shipped through a store, so a release
+  key would be ceremony and a signing secret in a public repository is a real
+  cost. No Gradle wrapper jar is committed for the same reason — an unreadable
+  binary in a public repo, replaced by one line in the workflow.
+
+### What it gives up
+
+Worth stating plainly, because the README could easily imply otherwise:
+
+- **Reasoning now needs a network.** There is no local model in the app. The
+  router still answers the great majority of commands entirely on the phone
+  and «άναψε τον φακό» sends nothing anywhere — but this app is *less* offline
+  than the Termux version. `backend = "llama"` over there remains the fully
+  private option.
+- **Automatic language detection.** Whisper went with the rest of the native
+  code, so there is a language toggle. It matters less than it sounds: the
+  router decides the language from which table matched, not from what the
+  recogniser assumed, so the toggle corrects itself after one Greek sentence.
+- **The key is not encrypted at rest.** App-private storage keeps other apps
+  out, which is the threat this needs to hold off. It is not protection
+  against someone holding your unlocked phone.
+
+### Not verified
+
+- **Nothing here has run on a phone**, and nothing has been compiled on this
+  laptop either — there is no Android SDK on it, which is why CI exists. The
+  first green build is the first time any of this Kotlin has been checked by a
+  compiler rather than by reading.
+- The Python program is unchanged and remains the reference implementation.
+
 ## v0.4.0 — 2026-08-10
 
 ### Added
