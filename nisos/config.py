@@ -93,6 +93,9 @@ DEFAULTS: dict[str, Any] = {
     },
     "tasker": {
         "task": "NisosAction",
+        # Which calendar to write to. Empty lets the Tasker task pick the
+        # first one it may write to -- right on a phone with one account.
+        "calendar_id": "",
     },
     "memory": {
         # Digits, no "+". Local numbers you teach it get this prefixed, since

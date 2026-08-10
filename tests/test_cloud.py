@@ -57,13 +57,31 @@ class FakeResponse:
 
 
 def tool_use(action="answer", args=None, stop="tool_use"):
-    """A well-formed Messages API response containing one tool call."""
+    """A well-formed Messages API response containing one tool call.
+
+    Written in the single-action shape the schema no longer asks for, on
+    purpose: that shape has to keep working, because a model that has slipped
+    the constraint reaches for it and answering "didn't catch that" to a clear
+    instruction is the worse failure.
+    """
     return {
         "stop_reason": stop,
         "content": [
             {"type": "thinking", "thinking": ""},
             {"type": "tool_use", "id": "toolu_1", "name": cloud.TOOL_NAME,
              "input": {"action": action, "args": args if args is not None else {}}},
+        ],
+    }
+
+
+def plan(*steps, stop="tool_use"):
+    """A tool call in the shape the schema actually asks for: a list."""
+    return {
+        "stop_reason": stop,
+        "content": [
+            {"type": "tool_use", "id": "toolu_1", "name": cloud.TOOL_NAME,
+             "input": {"steps": [{"action": name, "args": args}
+                                 for name, args in steps]}},
         ],
     }
 
@@ -135,7 +153,15 @@ class TestPrompt:
     def test_the_enum_is_generated_from_the_registry(self):
         """A new action must not need a second edit here to be reachable."""
         schema = cloud.build_tool(action_names())["input_schema"]
-        assert schema["properties"]["action"]["enum"] == action_names()
+        step = schema["properties"]["steps"]["items"]
+        assert step["properties"]["action"]["enum"] == action_names()
+
+    def test_the_tool_can_express_more_than_one_action(self):
+        """The schema is the whole ceiling: a model cannot report a second
+        action it has nowhere to put."""
+        schema = cloud.build_tool(action_names())["input_schema"]
+        assert schema["properties"]["steps"]["type"] == "array"
+        assert schema["required"] == ["steps"]
 
     def test_memories_go_in_the_user_turn_not_the_system_prompt(self):
         """So the system prefix stays byte-identical and cacheable."""
@@ -146,6 +172,18 @@ class TestPrompt:
         user = cloud.build_user("when is her birthday", {"marilena": "3 March"})
         assert "3 March" in user
         assert "when is her birthday" in user
+
+    def test_the_clock_travels_with_the_request_not_the_prefix(self):
+        """"Tomorrow at five" is unanswerable without it -- and putting it in
+        the system block would break the cache on every single turn."""
+        import datetime
+
+        stamped = cloud.build_user(
+            "dentist tomorrow at five",
+            now=datetime.datetime(2026, 8, 10, 14, 30))
+        assert "2026-08-10" in stamped
+        assert "Monday" in stamped
+        assert "2026-08-10" not in cloud.build_system("en", action_names())
 
 
 # --------------------------------------------------------------------------
@@ -239,6 +277,35 @@ class TestResponse:
         assert decision.args == {"minutes": 10}
         assert decision.backend == "claude"
         assert decision.seconds >= 0
+
+    def test_a_plan_becomes_several_steps_in_order(self, keyed, monkeypatch):
+        capture(monkeypatch, FakeResponse(
+            plan(("timer.set", {"minutes": 12}), ("torch.on", {}))))
+        decision = cloud.think("timer and torch", "en", action_names(), keyed)
+
+        assert [step.action for step in decision.steps] == ["timer.set",
+                                                            "torch.on"]
+        # The first step stays readable the old way, so nothing downstream has
+        # to know a turn can be a list to handle the case where it isn't.
+        assert decision.action == "timer.set"
+        assert decision.args == {"minutes": 12}
+
+    def test_a_single_step_plan_is_an_ordinary_decision(self, keyed,
+                                                        monkeypatch):
+        capture(monkeypatch, FakeResponse(plan(("torch.on", {}))))
+        decision = cloud.think("torch", "en", action_names(), keyed)
+        assert decision.action == "torch.on"
+        assert len(decision.steps) == 1
+
+    def test_an_empty_plan_is_unclear_rather_than_a_silent_turn(self, keyed,
+                                                                monkeypatch):
+        """Saying nothing at all is the one answer this program may not give."""
+        capture(monkeypatch, FakeResponse({
+            "stop_reason": "tool_use",
+            "content": [{"type": "tool_use", "name": cloud.TOOL_NAME,
+                         "input": {"steps": []}}],
+        }))
+        assert cloud.think("x", "en", action_names(), keyed).action == "unclear"
 
     def test_a_tool_call_with_no_action_is_unclear_not_a_crash(self, keyed,
                                                               monkeypatch):

@@ -44,11 +44,14 @@ import logging
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-__all__ = ["Decision", "BrainError", "think", "think_llama", "backend_for",
-           "build_prompt", "load_grammar", "available"]
+from .actions import Step
+
+__all__ = ["Decision", "BrainError", "Step", "think", "think_llama",
+           "backend_for", "build_prompt", "load_grammar", "available",
+           "steps_from"]
 
 log = logging.getLogger(__name__)
 
@@ -76,28 +79,53 @@ class BrainError(Exception):
 
 @dataclass
 class Decision:
-    """What the model decided to do.
+    """What the model decided to do -- one action, or several in order.
 
     Attributes:
-        action: An action name from the registry, or ``"answer"`` when it just
-            wants to say something, or ``"unclear"`` when it could not tell.
-        args: Arguments for the action.
+        action: The first action name from the registry, or ``"answer"`` when
+            it just wants to say something, or ``"unclear"`` when it could not
+            tell.
+        args: Arguments for that first action.
         seconds: How long the round trip took.
         backend: Which brain answered -- ``"llama"`` or ``"claude"``. Ends up
             in the log line, so a slow turn can be blamed on the right thing.
+        steps: Every action, in order. Left empty by the plain constructor,
+            which then fills it from ``action`` and ``args`` -- so the
+            hundreds of places that build a one-action Decision, tests
+            included, are untouched by this existing.
     """
 
     action: str
     args: dict
     seconds: float = 0.0
     backend: str = "llama"
+    steps: list[Step] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.steps:
+            self.steps = [Step(self.action, self.args)]
+
+    @classmethod
+    def from_steps(cls, steps: list[Step], seconds: float = 0.0,
+                   backend: str = "llama") -> "Decision":
+        """Build a Decision from a plan, keeping ``action`` on the first step.
+
+        An empty plan becomes ``unclear`` rather than an empty turn: the model
+        answering with nothing at all is a thing that can happen, and silence
+        is the one response this program is not allowed to give.
+        """
+        if not steps:
+            steps = [Step("unclear", {})]
+        return cls(steps[0].action, steps[0].args, seconds, backend,
+                   list(steps))
 
 
 LANGUAGE_NAMES = {"el": "Greek", "en": "English"}
 
 
 def build_prompt(text: str, language: str, actions: list[str],
-                 memories: dict[str, str] | None = None) -> str:
+                 memories: dict[str, str] | None = None,
+                 now: "datetime | None" = None) -> str:
     """Compose the instruction sent to the model.
 
     Args:
@@ -107,10 +135,17 @@ def build_prompt(text: str, language: str, actions: list[str],
             reason a 4B model copes with this at all.
         actions: Registered action names, so the prompt and the registry cannot
             drift apart.
+        memories: Anything stored that looks relevant to this utterance.
+        now: The clock, injected for the tests. It goes in the **user** turn,
+            never the system block: llama-server is told ``cache_prompt``, and
+            a system prompt carrying the time would be a different prefix every
+            minute and would never hit that cache once.
 
     Returns:
         A complete prompt string, in llama.cpp's plain-completion format.
     """
+    from datetime import datetime as _datetime
+    stamp = (now or _datetime.now()).strftime("%A %Y-%m-%d %H:%M")
     spoken = LANGUAGE_NAMES.get(language, "English")
     catalogue = ", ".join(actions)
 
@@ -125,16 +160,21 @@ def build_prompt(text: str, language: str, actions: list[str],
 
     return (
         "<|im_start|>system\n"
-        "You convert a phone user's spoken request into exactly one action.\n"
+        "You convert a phone user's spoken request into actions.\n"
         f"Available actions: {catalogue}\n"
         f"{known}"
-        "Reply with JSON only: {\"action\": \"<name>\", \"args\": {...}}\n"
+        "Reply with JSON only: "
+        "{\"steps\": [{\"action\": \"<name>\", \"args\": {...}}]}\n"
+        "One step for one request. Two steps if they asked for two things, in "
+        "the order they said them.\n"
         "Action names are always English, never translated.\n"
         "Use \"answer\" with an args.text field to reply conversationally, "
         f"written in {spoken}.\n"
         "Use \"unclear\" if the request makes no sense.\n"
+        "For calendar.add: args are summary, start as "
+        "\"YYYY-MM-DDTHH:MM\", and minutes.\n"
         "<|im_end|>\n"
-        f"<|im_start|>user\n{text}<|im_end|>\n"
+        f"<|im_start|>user\nNow: {stamp}\n{text}<|im_end|>\n"
         "<|im_start|>assistant\n"
     )
 
@@ -297,6 +337,50 @@ def think_llama(text: str, language: str, actions: list[str], config,
     return _parse(body.get("content", ""), elapsed)
 
 
+def steps_from(payload: dict) -> list[Step]:
+    """Read a plan out of a model's JSON, in either shape it can arrive in.
+
+    Both brains are pinned to ``{"steps": [...]}`` -- by the GBNF grammar
+    locally, by the tool schema online -- but the single-action
+    ``{"action": ..., "args": ...}`` shape is still accepted. It costs three
+    lines, it is what a model reaches for unprompted when something has gone
+    wrong with the constraint, and the alternative to accepting it is
+    answering "didn't catch that" to a perfectly clear instruction.
+
+    Returns:
+        The steps, in order. Empty when there is nothing usable, which the
+        caller turns into ``unclear``.
+
+    >>> steps_from({"steps": [{"action": "torch.on", "args": {}}]})
+    [Step(action='torch.on', args={})]
+    >>> steps_from({"action": "torch.off"})
+    [Step(action='torch.off', args={})]
+    >>> steps_from({"nonsense": True})
+    []
+    """
+    listed = payload.get("steps")
+    if isinstance(listed, list):
+        found = [step for step in (_step(item) for item in listed) if step]
+        if found:
+            return found
+        log.warning("Model returned a plan with no usable steps: %r", listed)
+        return []
+
+    single = _step(payload)
+    return [single] if single else []
+
+
+def _step(item) -> Step | None:
+    """One entry of a plan, or None if it is not one."""
+    if not isinstance(item, dict):
+        return None
+    action = item.get("action")
+    if not isinstance(action, str) or not action:
+        return None
+    args = item.get("args")
+    return Step(action, args if isinstance(args, dict) else {})
+
+
 def _parse(content: str, elapsed: float) -> Decision:
     """Turn the model's raw output into a :class:`Decision`.
 
@@ -320,12 +404,7 @@ def _parse(content: str, elapsed: float) -> Decision:
             log.warning("Model returned malformed JSON: %r", content[:200])
             return Decision("unclear", {}, elapsed)
 
-    action = data.get("action")
-    if not isinstance(action, str) or not action:
+    if not isinstance(data, dict):
         return Decision("unclear", {}, elapsed)
 
-    args = data.get("args")
-    if not isinstance(args, dict):
-        args = {}
-
-    return Decision(action, args, elapsed)
+    return Decision.from_steps(steps_from(data), elapsed)

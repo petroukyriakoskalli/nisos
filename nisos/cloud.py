@@ -37,9 +37,10 @@ import os
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
-from .brain import BrainError, Decision
+from .brain import BrainError, Decision, steps_from
 
 __all__ = ["ENDPOINT", "TOOL_NAME", "load_key", "store_key", "available",
            "reachable", "think", "build_system", "build_user"]
@@ -184,12 +185,20 @@ def build_system(language: str, actions: list[str]) -> str:
     catalogue = "\n".join(f"- {name}" for name in actions)
 
     return (
-        "You turn a phone user's spoken request into exactly one action.\n"
+        "You turn a phone user's spoken request into actions.\n"
         "\n"
         "The request was transcribed from speech, so expect the odd wrong word "
         "and pick the action the person clearly meant.\n"
         "\n"
+        "Usually that is one action. When they clearly asked for two things, "
+        "give two steps in the order they said them -- do not drop one, and do "
+        "not invent a second.\n"
+        "\n"
         f"Actions:\n{catalogue}\n"
+        "\n"
+        "calendar.add takes summary, start as \"YYYY-MM-DDTHH:MM\" in local "
+        "time, and minutes. The current date and time is given with each "
+        "request, so \"tomorrow at five\" is something you can work out.\n"
         "\n"
         f'Use "answer" with an args.text field to reply conversationally, '
         f"written in {spoken}, in one or two spoken sentences -- it is read "
@@ -200,50 +209,85 @@ def build_system(language: str, actions: list[str]) -> str:
     )
 
 
-def build_user(text: str, memories: dict[str, str] | None = None) -> str:
-    """Compose the user turn: what was said, plus anything relevant it was told.
+def build_user(text: str, memories: dict[str, str] | None = None,
+               now: "datetime | None" = None) -> str:
+    """Compose the user turn: when it is, what was said, and what it was told.
 
-    Memories live here rather than in the system prompt so the system prefix
-    stays cacheable -- see :func:`build_system`.
+    Everything that changes per utterance lives here rather than in the system
+    prompt, so the system prefix stays byte-identical and cacheable -- see
+    :func:`build_system`. The clock is the newest member of that list, and the
+    most tempting one to put in the system block, where it would break the
+    cache on every single request.
+
+    Without it, "tomorrow at five" is unanswerable: a model has no clock.
     """
-    if not memories:
-        return text
+    stamp = (now or datetime.now()).strftime("%A %Y-%m-%d %H:%M")
+    lines = [f"Now: {stamp}"]
 
-    known = "\n".join(f"- {key}: {value}" for key, value in memories.items())
-    return f"Things you have been told:\n{known}\n\nRequest: {text}"
+    if memories:
+        known = "\n".join(f"- {key}: {value}" for key, value in memories.items())
+        lines.append(f"Things you have been told:\n{known}")
+
+    lines.append(f"Request: {text}")
+    return "\n\n".join(lines)
 
 
 def build_tool(actions: list[str]) -> dict:
     """The one tool the model is forced to call.
 
+    The input is a **list** of steps, not a single action. "Set a timer for
+    twelve minutes and turn on the torch" is one sentence and two things, and
+    a schema that can only express one of them guarantees the second is lost
+    -- the model has nowhere to put it. A one-action request is a list of one,
+    which costs a handful of tokens and removes the whole class of bug.
+
     ``args`` is deliberately a free-form object, exactly as the GBNF grammar
     leaves it: the arguments differ per action (``minutes``, ``to``,
-    ``message``, ``level``, ``text``...) and enumerating every combination here
+    ``summary``, ``level``, ``text``...) and enumerating every combination here
     would be a second registry to keep in step. The ``action`` enum is the part
     that has to be exact, and it is generated.
     """
     return {
         "name": TOOL_NAME,
-        "description": "Perform one action on the user's phone, or answer them.",
+        "description": "Do what the user asked on their phone, or answer them.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": list(actions),
-                    "description": "Which action to perform.",
-                },
-                "args": {
-                    "type": "object",
+                "steps": {
+                    "type": "array",
+                    "minItems": 1,
                     "description": (
-                        "Arguments for the action, e.g. {\"minutes\": 10} for "
-                        "timer.set, {\"to\": \"Anna\", \"message\": \"...\"} for "
-                        "sms.send, {\"text\": \"...\"} for answer. Empty for "
-                        "actions that take none."
+                        "The actions to perform, in the order the user said "
+                        "them. One entry unless they genuinely asked for more "
+                        "than one thing."
                     ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "action": {
+                                "type": "string",
+                                "enum": list(actions),
+                                "description": "Which action to perform.",
+                            },
+                            "args": {
+                                "type": "object",
+                                "description": (
+                                    "Arguments for the action, e.g. "
+                                    "{\"minutes\": 10} for timer.set, "
+                                    "{\"to\": \"Anna\", \"body\": \"...\"} for "
+                                    "sms.send, {\"summary\": \"Dentist\", "
+                                    "\"start\": \"2026-08-11T17:00\", "
+                                    "\"minutes\": 60} for calendar.add, "
+                                    "{\"text\": \"...\"} for answer. Empty for "
+                                    "actions that take none."
+                                ),
+                            },
+                        },
+                        "required": ["action"],
+                    },
                 },
             },
-            "required": ["action"],
+            "required": ["steps"],
         },
     }
 
@@ -409,17 +453,15 @@ def _decision(payload: dict, elapsed: float) -> Decision:
 
     ``payload`` is already a parsed dict, so there is nothing to unescape here.
     Never string-match the serialised input: escaping is not guaranteed stable.
+
+    The reading itself is :func:`nisos.brain.steps_from`, shared with the
+    local model so the two brains cannot come to different conclusions about
+    the same JSON.
     """
-    action = payload.get("action")
-    if not isinstance(action, str) or not action:
-        log.warning("Tool call with no action: %r", payload)
-        return Decision("unclear", {}, elapsed, backend="claude")
-
-    args = payload.get("args")
-    if not isinstance(args, dict):
-        args = {}
-
-    return Decision(action, args, elapsed, backend="claude")
+    steps = steps_from(payload)
+    if not steps:
+        log.warning("Tool call with no usable action: %r", payload)
+    return Decision.from_steps(steps, elapsed, backend="claude")
 
 
 def _http_error(exc: urllib.error.HTTPError) -> BrainError:

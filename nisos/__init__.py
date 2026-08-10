@@ -16,10 +16,14 @@ trip online. Because Greek and English share no characters, the router doubles
 as the language detector for free -- whichever table matches tells you which
 language you just spoke.
 
+Since v0.4.0 a turn is a *list* of actions rather than one, so «άναψε τον φακό
+και βάλε χρονόμετρο» does both -- see :mod:`nisos.actions`'s ``Step``.
+
 Layout
 ------
 ============================  =====================================================
 :mod:`nisos.normalise`        Accent stripping, final sigma, number words
+:mod:`nisos.when`             «αύριο στις πέντε» into a real datetime
 :mod:`nisos.router`           The two regex tables; the fast path
 :mod:`nisos.actions`          What it can do, and how it reaches Android
 :mod:`nisos.replies`          What it says back, in both languages
@@ -35,5 +39,5 @@ Layout
 See EXTENDING.md for how to add a command.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = ["__version__"]

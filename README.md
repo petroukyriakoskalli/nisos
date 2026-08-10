@@ -7,7 +7,7 @@ back-tap trigger.
 ```
 you:    «βάλε χρονόμετρο δώδεκα λεπτά και άναψε τον φακό»
 nisos:  timer.set {"minutes": 12}   torch.on {}
-nisos:  «Δώδεκα λεπτά, και ο φακός άναψε.»
+nisos:  «12 λεπτά, ξεκίνησα. Άναψα τον φακό.»
         1.02 s   ·   net bytes: 0
 ```
 
@@ -44,6 +44,26 @@ works here because the alphabets are disjoint.
 *classify* Greek is a far easier job than asking it to *write* it — and for
 anything the router catches, the Greek reply is a string you wrote yourself,
 so the fast path has no model involvement at all.
+
+### One sentence, more than one thing
+
+The demo at the top is two commands, and for a long time it did one of them:
+the torch lit and the timer was dropped without a word. A turn is now a
+**list** of actions — in the router, in both brains' output, and in the log
+line — run in order and answered in one sentence.
+
+The rule that makes this safe is that a sentence is only split when **every**
+piece routes on its own:
+
+```
+«άναψε τον φακό και βάλε χρονόμετρο 12 λεπτά»       → two actions
+«στείλε στη Μαρία ότι άργησα και θα φάμε αργότερα»  → one message, «και» and all
+```
+
+The second one splits into a command and a fragment, the fragment routes
+nowhere, so the split is thrown away and the whole thing is one message
+exactly as before. A step that fails doesn't cancel the ones after it — they
+were separate requests — and the reply says which half worked.
 
 ## Two brains
 
@@ -288,8 +308,36 @@ python -m nisos --actions             # list everything it can do
 
 `--text` is the important one: the whole pipeline — routing, language
 detection, actions, replies — runs on a laptop. Only the audio is
-phone-specific, which is why the test suite covers 81 cases without a phone
+phone-specific, which is why the test suite covers 288 cases without a phone
 anywhere near it.
+
+### Appointments
+
+```bash
+python -m nisos --text "βάλε στο ημερολόγιο οδοντίατρο αύριο στις πέντε"
+#  → οδοντίατρο, 11/08 στις 17:00.
+python -m nisos --text "book a meeting with Nikos tomorrow at half past five"
+#  → meeting with Nikos, 11/08 at 17:30.
+```
+
+Three things there are worth knowing, because each is a decision that could
+have gone the other way:
+
+- **A bare hour of one to seven means the afternoon.** «στις πέντε» is 17:00.
+  Nobody arranges a dentist for five in the morning and says it that casually.
+  «το πρωί» / "in the morning" overrides it, always.
+- **The title keeps your spelling.** Patterns are matched against flattened
+  text — lowercase, no accents — but a calendar entry is *written down*, and
+  «οδοντιατρο» sitting in your diary is the plumbing showing. The title is
+  recovered from the raw transcript.
+- **No time means no appointment.** It says so rather than guessing an hour
+  for something that goes in a diary.
+
+It reads the appointment back — the day it landed on and the hour it picked
+are the two things most likely to be wrong and the two you cannot see until
+you open the calendar. Writing needs the Tasker task, and **if you imported
+that before today, import it again**: an older copy has no `calendar.add`
+branch. See [tasker/README.md](tasker/README.md).
 
 ## Speed
 
@@ -318,7 +366,10 @@ does — and nobody has timed it on the phone yet.
   current.
 - **A 4B model is a capable intern with no memory.** It will nail "remind me at
   six" and summarise a note. It will not reliably hold a three-step plan
-  together. The online brain does not have this limitation; it has a bill
+  together — and now that a turn *can* be a plan, that gap shows: the router
+  splits two commands perfectly whatever the brain, but a two-part instruction
+  phrased in a way the router misses is where `llama` and `claude` visibly
+  differ. The online brain does not have this limitation; it has a bill
   instead.
 - **Its Greek is worse than its English on the reasoned path** — on `llama`.
   Routed replies are flawless because you wrote them; anything the local model
@@ -337,6 +388,7 @@ does — and nobody has timed it on the phone yet.
 | Module | What lives there |
 |---|---|
 | `nisos/normalise.py` | Accent stripping, final sigma, number words |
+| `nisos/when.py` | «αύριο στις πέντε» → a real datetime |
 | `nisos/router.py` | The two regex tables — the fast path |
 | `nisos/actions.py` | What it can do, and how it reaches Android |
 | `nisos/replies.py` | What it says back, in both languages |
@@ -355,7 +407,8 @@ edits and the test suite tells you if you've missed one.
 python -m pytest -q
 ```
 
-197 tests, no phone and no network required — the API is stubbed.
+288 tests, no phone and no network required — the API is stubbed, and the
+Tasker XML is checked for the two characters that make it fail to import.
 
 ## Licence
 

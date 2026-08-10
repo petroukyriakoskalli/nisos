@@ -1,5 +1,105 @@
 # Changelog
 
+## v0.4.0 — 2026-08-10
+
+### Added
+
+- **A turn can do more than one thing.** The demo at the top of the README —
+  «βάλε χρονόμετρο δώδεκα λεπτά και άναψε τον φακό» — lit the torch and dropped
+  the timer without a word. It had done that since the first commit, in the one
+  example everybody reads first.
+
+  A turn is now a **list of steps**, all the way through: `Match.steps` out of
+  the router, `Decision.steps` out of either brain, `Turn.steps` in the log
+  line, run in order and answered in one sentence. `action` and `args` stay
+  exactly where they were on all three, pointing at the first step, so nothing
+  that reads them had to change and a one-action turn is byte-for-byte what it
+  always was — including the spoken reply, which is why `replies.stitch`
+  returns a single part untouched rather than joining it with itself.
+
+  The safety of the whole thing rests on one rule: **a sentence is split only
+  when every piece routes on its own.** «στείλε στη Μαρία ότι άργησα και θα
+  φάμε αργότερα» splits into a command and a fragment, the fragment routes
+  nowhere, the split is thrown away, and it stays one message with «και» inside
+  it. Cutting a message in half would be a far worse bug than the one this
+  fixes, so the conservative direction is the default one. Beyond four pieces
+  it does not split at all — five orders in one breath is far likelier to be a
+  sentence with five «και»s in it.
+
+  A step that fails does not cancel the ones after it. They were separate
+  requests, and there is no reason for the torch to stay off because a message
+  failed; the reply says which half worked.
+
+  Both brains had to be able to *express* a second action, or the model has
+  nowhere to put one and the ceiling is the schema rather than the model. The
+  GBNF root is now a list (with the single-object form still legal, because a
+  4B model that has seen the old shape a thousand times will reach for it), and
+  the tool schema takes `steps`. One reader, `brain.steps_from`, is shared by
+  both, so the two brains cannot disagree about the same JSON.
+
+- **`calendar.add`** — «βάλε στο ημερολόγιο οδοντίατρο αύριο στις πέντε»,
+  "book a meeting with Nikos tomorrow at half past five". The write half of a
+  bridge that could only read.
+
+  The interesting part is not the Tasker call, it is **`nisos/when.py`**:
+  spoken time into a real datetime, pure and testable on a laptop, which is
+  where the judgement calls live. A bare hour of one to seven means the
+  afternoon — «στις πέντε» is 17:00, because nobody arranges a dentist for five
+  in the morning and says it that casually. A day with no time gets 09:00. A
+  time with no day is the next time that time happens. Each of those is one
+  sentence you can say out loud when it gets something wrong, which is worth
+  more than being clever.
+
+  The title is subtracted rather than captured: everything that is neither the
+  instruction nor the time is the name of the appointment. That is what makes
+  «βάλε ραντεβού με τον γιατρό αύριο» and "put the dentist in my calendar
+  tomorrow" both work without agreeing on word order.
+
+  It reads the appointment back — the day it landed on and the hour it picked
+  are exactly the two things most likely to be wrong and the two you cannot see
+  until you open the calendar.
+
+- **`Normalised`**, a string that remembers its own spelling. Patterns are
+  matched against flattened text, which is right for *matching* and wrong for
+  anything that gets **written down**: a calendar entry titled «οδοντιατρο»
+  instead of «οδοντίατρος» is the assistant's plumbing leaking into your diary.
+  Argument builders can now ask for the user's own words back. Word positions
+  rather than character offsets, because flattening is not length-preserving
+  but never splits or joins a word.
+
+- **The clock now travels with every reasoned request.** "Tomorrow at five" is
+  unanswerable otherwise — a model has no clock. It goes in the *user* turn on
+  both brains, never the system block, which would break the API's prompt cache
+  on every single turn and llama-server's `cache_prompt` once a minute.
+
+- **`tests/test_tasker.py`.** The Tasker XML cannot contain a `<` or an `&` —
+  one is a tag, the other is an entity, and either makes the task fail to
+  import while looking like perfectly ordinary JavaScript. Escaping is not the
+  fix, because the README also tells you to paste that block in by hand. There
+  is now a test, and a second one asserting every action nisos broadcasts has a
+  branch waiting for it.
+
+### Changed
+
+- The log line names every action a turn ran (`torch.on + time.read`). A log
+  that shows only the first is precisely how a dropped second one stays
+  invisible for eleven versions.
+- `calendar.next` and `calendar.add` share the answer-file wait, and the
+  stale-answer delete that goes with it.
+
+### Not verified
+
+- **Nothing here has run on a phone**, and `calendar.add`'s Tasker branch is
+  the piece that cannot be checked anywhere else. It inserts through the
+  calendar provider using Tasker's shell — the same mechanism `calendar.next`
+  already used, chosen so there is one route to verify rather than two. Tasker's
+  own **Calendar Insert** action is the fallback if a device refuses it, and
+  `tasker/README.md` has the two-minute hand-built task and the one line to
+  change.
+- ⚠️ **Re-import `NisosAction`.** An older copy has no `calendar.add` branch;
+  it will answer, and the answer will not say `ok`, so appointments fail with
+  "that didn't work" rather than silently going nowhere.
+
 ## v0.3.0 — 2026-08-10
 
 ### Added

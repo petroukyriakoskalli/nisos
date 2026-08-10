@@ -71,13 +71,33 @@ r"\bαναψε\b"            # only ever the first one
 ```
 
 Order matters within a table: the first hit wins, so put specific patterns
-above general ones.
+above general ones. `calendar.add` sits above `calendar.next` for exactly that
+reason — «κλείσε ραντεβού αύριο στις πέντε» would otherwise be answered by
+reading you your next meeting.
 
 If the command takes a number, pass an argument builder:
 
 ```python
 Route(r"\bbrightness\b", "screen.set", _level("en"))
 ```
+
+An argument builder receives `(text, match)`. `text` is a `Normalised` — a
+string in every way that matters, plus `.original(word_indices)`, which hands
+back the user's own spelling. Use it for anything that gets **written down**
+rather than spoken: `calendar.add` builds its title that way, because
+«οδοντιατρο» sitting in your diary is the plumbing showing. A spoken reply
+never needs it, since those are strings you wrote.
+
+### 2b. If the command splits, check it still doesn't
+
+A sentence is cut into several actions on «και» / "and" / a comma, and the cut
+is only kept when **every** piece routes on its own. That rule is what stops
+«στείλε στη Μαρία ότι άργησα και θα φάμε αργότερα» becoming half a message.
+
+The trap is a route that matches a *fragment*. If your new pattern is loose
+enough to fire on "θα φάμε αργότερα", it doesn't just add a wrong action — it
+makes previously-safe sentences start splitting. Add a case to
+`TestSplittingIsRefusedWhenItWouldBeWrong` when you add a broad pattern.
 
 ### 3. Add the phrases — `nisos/replies.py`
 
@@ -158,17 +178,25 @@ def think(text, language, actions, config, memories=None) -> Decision
 ```
 
 Return a `Decision`, and set its `backend` so the log line tells the truth.
+Build a multi-action one with `Decision.from_steps([Step(...), Step(...)])`;
+the plain constructor still takes a single action and fills `steps` in for you,
+so a backend that only ever returns one thing needs to know none of this.
+
 Raise `BrainError` on anything else, with a `reply_key` when you know which
 entry in `nisos.replies.SAY` describes the failure — that is what turns "it
 didn't work" into "there's no key". Then add the name to `BACKENDS` and one
 branch in `backend_for()`.
 
-Two things the existing backends both do, and a new one should:
+Three things the existing backends both do, and a new one should:
 
 - **Constrain the output rather than parsing it.** llama-server gets a GBNF
   grammar, the API gets a forced `tool_choice`. Both make a malformed action
   impossible instead of unlikely, which is worth more than any amount of
   defensive parsing on the way back.
+- **Let the constraint express a list.** A schema that can only hold one action
+  guarantees the second one is lost — the model has nowhere to put it. Read the
+  result with `brain.steps_from`, which both existing backends share so they
+  cannot come to different conclusions about the same JSON.
 - **Never let a diagnostic get swallowed.** Include what the other side actually
   said — HTTP status, error body, all of it. Suppressing that has cost this
   project a diagnosis three separate times.
@@ -189,6 +217,12 @@ reason it is Python and not an `echo`.
 but not Greek, the assistant is cleverer in one language than the other and you
 will never remember which. `test_both_languages_cover_the_same_actions` fails
 if they drift.
+
+**The Tasker XML cannot contain `<` or `&`.** That JavaScript lives inside an
+XML element, so a counted loop and a logical *and* both make the task fail to
+import — silently, looking like ordinary JavaScript. Escaping them doesn't work
+either, because you are also told to paste the block into Tasker by hand.
+`tests/test_tasker.py` fails if either character appears.
 
 **Never write a timestamped temp file.** The recording always goes to the same
 path and overwrites. Writing `input-<timestamp>.wav` is the classic way to fill

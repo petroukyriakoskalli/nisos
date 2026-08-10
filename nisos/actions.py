@@ -41,12 +41,15 @@ import logging
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from .when import DEFAULT_MINUTES
+
 __all__ = [
-    "action", "REGISTRY", "ActionError", "ExecutionContext",
+    "action", "REGISTRY", "ActionError", "ExecutionContext", "Step",
     "execute", "action_names", "CALENDAR_ANSWER",
 ]
 
@@ -64,6 +67,25 @@ CALENDAR_ANSWER = "/sdcard/nisos/calendar.json"
 
 class ActionError(Exception):
     """An action failed in a way the user should hear about, not a crash."""
+
+
+@dataclass(frozen=True)
+class Step:
+    """One action and its arguments -- the unit a turn is built out of.
+
+    A turn used to be exactly one of these, and that was the single biggest
+    thing wrong with the program: «βάλε χρονόμετρο δώδεκα λεπτά **και** άναψε
+    τον φακό» lit the torch and dropped the timer without a word. It is two
+    steps, and both the router and the model can now say so.
+
+    Attributes:
+        action: A name from :data:`REGISTRY`. Always English -- see the note
+            at the top of this module.
+        args: Keyword arguments for the handler.
+    """
+
+    action: str
+    args: dict = field(default_factory=dict)
 
 
 Handler = Callable[[dict, "ExecutionContext"], dict]
@@ -125,7 +147,12 @@ class ExecutionContext:
         timeout: Seconds to allow any single shell command.
         answer_timeout: Seconds to wait for Tasker to write an answer file.
             Generous, because a broadcast has to wake Tasker up first.
-        calendar_answer: Path Tasker writes the next calendar entry to.
+        calendar_answer: Path Tasker writes its answer to -- the next entry
+            for ``calendar.next``, and whether the write landed for
+            ``calendar.add``.
+        calendar_id: Which calendar ``calendar.add`` writes to. Empty means
+            let Tasker pick the first writable one, which is right on a phone
+            with a single account and wrong on a phone with five.
         contacts: Alias table mapping mangled recogniser output back to real
             names. A Greek-locked recogniser renders "Anna" phonetically, so
             «στείλε στην Άννα» needs «αννα» -> "Anna" to find the contact.
@@ -136,6 +163,7 @@ class ExecutionContext:
     timeout: float = 10.0
     answer_timeout: float = 4.0
     calendar_answer: str = CALENDAR_ANSWER
+    calendar_id: str = ""
     contacts: dict[str, str] = None  # type: ignore[assignment]
     memory: "object | None" = None
     country_code: str = ""
@@ -403,24 +431,126 @@ def calendar_next(args: dict, ctx: ExecutionContext) -> dict:
     goes out. Without that, a Tasker task that fails silently looks like it
     worked and reports yesterday's meeting.
     """
+    answer = _clear_answer(ctx)
+    ctx.tasker("calendar.next")
+    if ctx.dry_run:
+        return {"summary": "nothing", "minutes": 0}
+
+    data = _await_answer(answer, ctx)
+    try:
+        minutes = int(data.get("minutes", 0) or 0)
+    except (TypeError, ValueError):
+        minutes = 0
+    return {"summary": data.get("summary", "nothing"), "minutes": minutes}
+
+
+@action("calendar.add")
+def calendar_add(args: dict, ctx: ExecutionContext) -> dict:
+    """Write an appointment into the calendar. The other half of this bridge.
+
+    ``calendar.next`` reads; this one writes. Both go through Tasker for the
+    same reason -- calendar access is a permission Termux does not declare and
+    therefore can never be granted -- and both wait for an answer file,
+    because a broadcast cannot hand a value back.
+
+    Args:
+        args: ``summary``, ``start`` as local ``YYYY-MM-DDTHH:MM``, and
+            ``minutes``. The router fills these in from
+            :mod:`nisos.when`; the model is asked for the same three in
+            :func:`nisos.cloud.build_system`.
+
+    The answer must come back with ``ok`` set. That is not ceremony: an older
+    ``NisosAction`` task, one that has never heard of ``calendar.add``, falls
+    into its own else-branch and writes a perfectly well-formed answer saying
+    it did nothing. Requiring a field the old branch cannot produce is what
+    turns "it silently didn't happen" into "that didn't work".
+    """
+    summary = (args.get("summary") or "").strip()
+    if not summary:
+        raise ActionError("no title heard")
+
+    start = _moment(args.get("start"))
+    if start is None:
+        raise ActionError(f"couldn't read the time {args.get('start')!r}")
+
+    try:
+        minutes = max(1, int(args.get("minutes") or DEFAULT_MINUTES))
+    except (TypeError, ValueError):
+        minutes = DEFAULT_MINUTES
+
+    fields = {"summary": summary,
+              "date": start.strftime("%d/%m"),
+              "time": start.strftime("%H:%M")}
+
+    answer = _clear_answer(ctx)
+    ctx.tasker("calendar.add", {
+        "summary": summary,
+        # Milliseconds since the epoch, because that is what the calendar
+        # provider stores and it leaves no room for a timezone to be argued
+        # about on the far side of the bridge.
+        "start_ms": int(start.timestamp() * 1000),
+        "minutes": minutes,
+        "calendar_id": ctx.calendar_id,
+    })
+    if ctx.dry_run:
+        return fields
+
+    if not _await_answer(answer, ctx).get("ok"):
+        raise ActionError(
+            f"Tasker did not write the appointment -- does {ctx.tasker_task} "
+            f"have a calendar.add branch, and does Tasker hold the Calendar "
+            f"permission? See tasker/README.md"
+        )
+    return fields
+
+
+def _moment(value) -> datetime | None:
+    """Read ``YYYY-MM-DDTHH:MM`` -- the one date format that crosses layers.
+
+    Tolerant of the shapes a model reaches for on its own: a space instead of
+    the T, and trailing seconds. Anything else is a None, which the caller
+    turns into something spoken rather than a traceback.
+    """
+    if isinstance(value, datetime):
+        return value
+    text = str(value or "").strip().replace(" ", "T")
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _clear_answer(ctx: ExecutionContext) -> Path:
+    """Delete the previous answer before asking for a new one.
+
+    Without this a Tasker task that fails silently looks like it worked and
+    reports yesterday's meeting -- or, now, claims it wrote an appointment
+    that it did not write.
+    """
     answer = Path(ctx.calendar_answer).expanduser()
     try:
         answer.unlink()
     except OSError:
         pass
+    return answer
 
-    ctx.tasker("calendar.next")
-    if ctx.dry_run:
-        return {"summary": "nothing", "minutes": 0}
 
+def _await_answer(answer: Path, ctx: ExecutionContext) -> dict:
+    """Wait for Tasker to write `answer`, and return what it said.
+
+    Raises:
+        ActionError: If nothing appears within ``ctx.answer_timeout``.
+    """
     deadline = time.monotonic() + ctx.answer_timeout
     while time.monotonic() < deadline:
         try:
             data = json.loads(answer.read_text(encoding="utf-8"))
-            return {"summary": data.get("summary", "nothing"),
-                    "minutes": int(data.get("minutes", 0) or 0)}
         except (FileNotFoundError, json.JSONDecodeError, ValueError):
             time.sleep(0.05)
+            continue
+        return data if isinstance(data, dict) else {}
     raise ActionError(
         f"calendar didn't answer within {ctx.answer_timeout:.0f}s -- is the "
         f"{ctx.tasker_task} task installed? See tasker/README.md"

@@ -13,7 +13,18 @@
 # Action names are ALWAYS English, in both languages. The model classifies
 # Greek; it never has to write it except inside args.text.
 
-root    ::= "{" ws "\"action\"" ws ":" ws verb ws "," ws "\"args\"" ws ":" ws args ws "}"
+# A turn can be more than one action -- "set a timer for twelve minutes and
+# turn on the torch" is one sentence and two things -- so the root is a list.
+# The bare single-action object is still legal below it: a 4B model that has
+# seen the older shape a thousand times will occasionally reach for it, and
+# nisos reads both (nisos/brain.py steps_from), so forbidding it here would
+# turn a understood instruction into "didn't catch that" for no gain.
+
+root    ::= plan | step
+
+plan    ::= "{" ws "\"steps\"" ws ":" ws "[" ws step (ws "," ws step)* ws "]" ws "}"
+
+step    ::= "{" ws "\"action\"" ws ":" ws verb ws "," ws "\"args\"" ws ":" ws args ws "}"
 
 verb    ::= "\"torch.on\""
           | "\"torch.off\""
@@ -24,6 +35,7 @@ verb    ::= "\"torch.on\""
           | "\"dnd.on\""
           | "\"volume.set\""
           | "\"calendar.next\""
+          | "\"calendar.add\""
           | "\"whatsapp.send\""
           | "\"memory.remember\""
           | "\"memory.recall\""

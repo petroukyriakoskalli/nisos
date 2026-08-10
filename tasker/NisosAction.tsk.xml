@@ -64,9 +64,89 @@ if (action === "ping") {
 		answer({ summary: "nothing", minutes: 0 });
 	}
 
+} else if (action === "calendar.add") {
+	// The write half. Tasker does have a Calendar Insert action, but a
+	// JavaScriptlet cannot invoke one and hand it three separate fields, so
+	// this goes the same way calendar.next does: the provider, through
+	// Tasker's shell, which is where the calendar permission lives. If your
+	// device refuses the insert, tasker/README.md has the hand-built Calendar
+	// Insert task and the one line to change to call it instead.
+	//
+	// Note `ok` in the answer. nisos requires it, and the else-branch below
+	// cannot produce it -- that is what stops an older copy of this task from
+	// silently reporting success for an appointment it never wrote.
+	var start = parseInt(payload.start_ms, 10) || 0;
+	var length = (parseInt(payload.minutes, 10) || 60) * 60000;
+	var title = String(payload.summary || "nisos");
+	var zone = "";
+	try { zone = (shell("getprop persist.sys.timezone", false, 5) || "").trim(); }
+	catch (e) { zone = ""; }
+	if (!zone) { zone = "UTC"; }
+
+	var target = String(payload.calendar_id || "").trim();
+	if (!target) { target = firstWritableCalendar(); }
+
+	if (!start || !target) {
+		flash("nisos: " + (target ? "no start time" : "no writable calendar"));
+		answer({ ok: false, error: target ? "no start time" : "no calendar" });
+	} else {
+		var out = "";
+		try {
+			out = shell("content insert --uri content://com.android.calendar/events" +
+			            " --bind calendar_id:i:" + target +
+			            " --bind title:s:" + quote(title) +
+			            " --bind dtstart:l:" + start +
+			            " --bind dtend:l:" + (start + length) +
+			            " --bind eventTimezone:s:" + quote(zone),
+			            false, 15);
+		} catch (e) { out = "Exception: " + e; }
+
+		// `content insert` says nothing at all when it works.
+		var failed = /Error|Exception|Failure/i.test(out || "");
+		if (failed) { flash("nisos: calendar insert failed -- " + out); }
+		answer({ ok: !failed, error: failed ? String(out).substring(0, 200) : "" });
+	}
+
 } else {
 	flash("nisos: unknown action " + action);
 	answer({ summary: "nothing", minutes: 0 });
+}
+
+function quote(value) {
+	// Single-quote it for the shell, escaping any single quote inside by
+	// closing, escaping and reopening. Titles are user speech, and «ραντεβού
+	// με τον O'Brien» has to survive this rather than become a syntax error.
+	return "'" + String(value).replace(/'/g, "'\\''") + "'";
+}
+
+function firstWritableCalendar() {
+	// CAL_ACCESS_CONTRIBUTOR is 500, owner is 700. Anything below that can be
+	// read but not written to, and picking one of those is how an insert
+	// fails with a permission error on a phone that has the permission.
+	var out = "";
+	try {
+		out = shell("content query --uri content://com.android.calendar/calendars" +
+		            " --projection _id:calendar_access_level:visible", false, 15);
+	} catch (e) { return ""; }
+
+	//
+	// Note the loop shape and the nested if, which are not an accident. This
+	// JavaScript lives inside an XML element, and two characters cannot
+	// appear there: a bare less-than sign, and an ampersand, which starts an
+	// entity. Either one makes this file fail to import. Escaping them is not
+	// the fix, because the README also tells you to paste this block into
+	// Tasker by hand, where an escape would arrive as literal broken
+	// JavaScript. So the code avoids both characters entirely -- hence
+	// "for (var i in rows)" rather than a counted loop, and a nested if
+	// rather than a logical and.
+	var rows = String(out || "").split("\n");
+	for (var i in rows) {
+		var found = /_id=(\d+).*calendar_access_level=(\d+)/.exec(rows[i]);
+		if (found) {
+			if (parseInt(found[2], 10) >= 500) { return found[1]; }
+		}
+	}
+	return "";
 }
 
 exit();</Str>

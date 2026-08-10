@@ -159,6 +159,15 @@ calendar_answer = "/sdcard/nisos/calendar.json"
 # Tasker before it can even start.
 answer_timeout = 4.0
 
+# Which calendar «βάλε στο ημερολόγιο» writes to, as a numeric id. Empty means
+# let the Tasker task pick the first one it is allowed to write to, which is
+# right on a phone with one account and a coin toss on a phone with five.
+#
+# To find the id, with Tasker's calendar permission granted:
+#   content query --uri content://com.android.calendar/calendars \
+#     --projection _id:account_name:calendar_displayName
+calendar_id = ""
+
 
 [contacts]
 # Code-switching is this program's weakest point. A Greek-locked recogniser

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 
-__all__ = ["SAY", "say", "missing_replies"]
+__all__ = ["SAY", "say", "stitch", "missing_replies"]
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +84,14 @@ SAY: dict[str, dict[str, str]] = {
     "calendar.next": {
         "en": "{summary}, in {minutes} minutes.",
         "el": "{summary}, σε {minutes} λεπτά.",
+    },
+    # Reads the appointment back rather than just confirming, because the two
+    # things most likely to be wrong -- the day it landed on and the hour it
+    # picked -- are invisible otherwise until you open the calendar. The date
+    # and time are digits, so one template serves both languages honestly.
+    "calendar.add": {
+        "en": "{summary}, {date} at {time}.",
+        "el": "{summary}, {date} στις {time}.",
     },
     "time.read": {
         "en": "It's {time}.",
@@ -167,6 +175,45 @@ def say(action: str, language: str, **fields) -> str:
         # Strip the unfilled placeholders rather than speaking literal braces.
         import re
         return re.sub(r"\s*\{[^}]*\}", "", template).strip() or action
+
+
+#: What counts as an already-finished sentence, so :func:`stitch` does not add
+#: a second full stop after one.
+_TERMINATORS = ".!?…:"
+
+
+def stitch(parts: list[str]) -> str:
+    """Join the replies from several actions into one thing to say.
+
+    A turn that did two things has to answer once, not twice: two calls to the
+    text-to-speech engine means two utterances, and on Android the second one
+    routinely arrives on top of the first.
+
+    Args:
+        parts: One rendered reply per action, in the order they ran.
+
+    Returns:
+        A single utterance. **A single part is returned untouched** -- that is
+        the whole reason this is not just ``" ".join`` with punctuation added.
+        The overwhelmingly common turn is one action, and it must sound
+        precisely as it always has; only a turn that genuinely has two things
+        to say gets the full stop inserted that keeps them from running
+        together.
+
+    >>> stitch(["Torch on."])
+    'Torch on.'
+    >>> stitch(["12 minutes, counting.", "Torch on."])
+    '12 minutes, counting. Torch on.'
+    >>> stitch(["Άναψα τον φακό.", "99123456"])
+    'Άναψα τον φακό. 99123456.'
+    """
+    said = [part.strip() for part in parts if part and part.strip()]
+    if not said:
+        return ""
+    if len(said) == 1:
+        return said[0]
+    return " ".join(part if part[-1] in _TERMINATORS else part + "."
+                    for part in said)
 
 
 def missing_replies(actions: list[str], languages: tuple[str, ...] = ("en", "el")

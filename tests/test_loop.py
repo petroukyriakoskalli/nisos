@@ -55,6 +55,65 @@ class TestRoutedTurns:
         loop.handle("άναψε τον φακό", cfg, RecordingContext())
 
 
+class TestTurnsThatDoTwoThings:
+    """The README's own headline demo, which used to do half of what it says.
+
+    «βάλε χρονόμετρο δώδεκα λεπτά και άναψε τον φακό» lit the torch and
+    dropped the timer in silence.
+    """
+
+    def test_both_actions_actually_run(self, cfg, silence):
+        ctx = RecordingContext()
+        turn = loop.handle("βάλε χρονόμετρο δώδεκα λεπτά και άναψε τον φακό",
+                           cfg, ctx)
+        assert [s.action for s in turn.steps] == ["timer.set", "torch.on"]
+        assert ("termux-torch", "on") in ctx.commands
+        assert any("SET_TIMER" in " ".join(c) for c in ctx.commands)
+
+    def test_one_reply_covers_both(self, cfg, silence):
+        """Two calls to the speech engine means two utterances, and on Android
+        the second routinely lands on top of the first."""
+        turn = loop.handle("βάλε χρονόμετρο δώδεκα λεπτά και άναψε τον φακό",
+                           cfg, RecordingContext())
+        assert turn.spoken == "12 λεπτά, ξεκίνησα. Άναψα τον φακό."
+        assert len(silence) == 1
+
+    def test_a_failing_step_does_not_cancel_the_others(self, cfg, silence):
+        """They were separate requests. The reply says which half worked."""
+        ctx = RecordingContext()
+        turn = loop.handle("set a timer and torch on", cfg, ctx)
+        assert [s.action for s in turn.steps] == ["timer.set", "torch.on"]
+        assert ("termux-torch", "on") in ctx.commands   # ran despite the timer
+        assert "That didn't work." in turn.spoken
+        assert "Torch on." in turn.spoken
+
+    def test_the_log_line_names_every_action(self, cfg, silence):
+        """A log showing only the first is how a dropped second stays
+        invisible -- which is exactly how this went unnoticed."""
+        turn = loop.handle("torch on and what time is it", cfg,
+                           RecordingContext())
+        assert "torch.on + time.read" in turn.summary()
+
+    def test_a_reasoned_plan_runs_in_order(self, cfg, monkeypatch, silence):
+        from nisos.brain import Decision, Step
+
+        monkeypatch.setattr(
+            loop.brain, "think",
+            lambda text, language, actions, config, **kw:
+                Decision.from_steps([Step("torch.on", {}),
+                                     Step("answer", {"text": "Έγινε."})], 1.4),
+        )
+        turn = loop.handle("κάνε τα δύο πράγματα", cfg, RecordingContext(),
+                           language_hint="el")
+        assert [s.action for s in turn.steps] == ["torch.on", "answer"]
+        assert turn.spoken == "Άναψα τον φακό. Έγινε."
+
+    def test_a_one_action_turn_sounds_exactly_as_it_always_did(self, cfg,
+                                                               silence):
+        """The stitching must be invisible on the common path."""
+        assert loop.handle("torch on", cfg, RecordingContext()).spoken == "Torch on."
+
+
 class TestReasonedTurns:
     def test_falls_through_to_the_model(self, cfg, monkeypatch, silence):
         from nisos.brain import Decision

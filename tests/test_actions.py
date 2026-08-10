@@ -178,6 +178,97 @@ class TestCalendar:
         assert "com.termux" not in CALENDAR_ANSWER
 
 
+class TestCalendarAdd:
+    """Writing an appointment -- the other half of the calendar bridge."""
+
+    @staticmethod
+    def _answering(tmp_path, reply):
+        """A context whose Tasker broadcast writes `reply`, as Tasker does."""
+        answer = tmp_path / "calendar.json"
+
+        class AnsweringContext(RecordingContext):
+            def termux(self, *command):
+                answer.write_text(json.dumps(reply), encoding="utf-8")
+                return super().termux(*command)
+
+        ctx = AnsweringContext()
+        ctx.calendar_answer = str(answer)
+        ctx.answer_timeout = 0.3
+        return ctx
+
+    def test_sends_the_appointment_to_tasker(self, tmp_path):
+        ctx = self._answering(tmp_path, {"ok": True})
+        key, fields = execute("calendar.add", {
+            "summary": "Οδοντίατρος",
+            "start": "2026-08-11T17:00",
+            "minutes": 30,
+        }, ctx)
+
+        assert key == "calendar.add"
+        command = ctx.commands[0]
+        assert command[command.index("par1") + 1] == "calendar.add"
+        payload = json.loads(command[command.index("par2") + 1])
+        assert payload["summary"] == "Οδοντίατρος"
+        assert payload["minutes"] == 30
+        # Milliseconds since the epoch, so no timezone can be argued about on
+        # the far side of the bridge.
+        assert payload["start_ms"] == int(
+            __import__("datetime").datetime(2026, 8, 11, 17, 0).timestamp() * 1000)
+
+    def test_reads_the_appointment_back(self, tmp_path):
+        """The day it landed on and the hour it picked are the two things most
+        likely to be wrong, and invisible until you open the calendar."""
+        ctx = self._answering(tmp_path, {"ok": True})
+        _, fields = execute("calendar.add", {
+            "summary": "Dentist", "start": "2026-08-11T17:00"}, ctx)
+        assert fields["date"] == "11/08"
+        assert fields["time"] == "17:00"
+        assert replies.say("calendar.add", "en", **fields) == \
+            "Dentist, 11/08 at 17:00."
+
+    def test_an_older_tasker_task_is_not_mistaken_for_success(self, tmp_path):
+        """A NisosAction that has never heard of calendar.add falls into its
+        own else-branch and writes a perfectly well-formed answer saying it
+        did nothing. Requiring `ok` is what makes that audible."""
+        ctx = self._answering(tmp_path, {"summary": "nothing", "minutes": 0})
+        key, _ = execute("calendar.add", {
+            "summary": "Dentist", "start": "2026-08-11T17:00"}, ctx)
+        assert key == "failed"
+
+    def test_no_time_is_a_polite_failure_rather_than_a_guess(self, ctx):
+        """Guessing an hour for something that goes in a diary is worse than
+        admitting you missed it."""
+        key, _ = execute("calendar.add", {"summary": "Dentist"}, ctx)
+        assert key == "failed"
+        assert ctx.commands == []
+
+    def test_an_unreadable_time_never_reaches_tasker(self, ctx):
+        key, _ = execute("calendar.add", {
+            "summary": "Dentist", "start": "sometime next week"}, ctx)
+        assert key == "failed"
+        assert ctx.commands == []
+
+    def test_a_model_written_time_with_a_space_is_accepted(self, tmp_path):
+        """What a model reaches for when nobody is watching."""
+        ctx = self._answering(tmp_path, {"ok": True})
+        key, fields = execute("calendar.add", {
+            "summary": "Dentist", "start": "2026-08-11 17:00:00"}, ctx)
+        assert key == "calendar.add"
+        assert fields["time"] == "17:00"
+
+    def test_stale_answers_cannot_confirm_a_write_that_never_happened(
+            self, tmp_path, ctx):
+        answer = tmp_path / "calendar.json"
+        answer.write_text('{"ok": true}', encoding="utf-8")
+        ctx.calendar_answer = str(answer)
+        ctx.answer_timeout = 0.2
+
+        key, _ = execute("calendar.add", {
+            "summary": "Dentist", "start": "2026-08-11T17:00"}, ctx)
+        assert key == "failed"
+        assert not answer.exists()
+
+
 class TestBattery:
     def test_parses_termux_json(self):
         ctx = RecordingContext(responses={

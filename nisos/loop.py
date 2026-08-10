@@ -47,9 +47,12 @@ class Turn:
     Attributes:
         heard: The transcript used.
         language: Which language it was decided to be.
-        action: The action that ran.
+        action: The first action that ran -- or, when the turn failed before
+            anything ran, the reply key describing why.
         args: Its arguments.
-        spoken: What was said back.
+        steps: Every action the turn performed, in order. One entry for the
+            common case; the point of it existing is the case that isn't.
+        spoken: What was said back -- one utterance, however many actions.
         path: ``"routed"`` or ``"reasoned"`` -- which branch was taken.
         source: Which recogniser won.
         backend: Which brain answered on a reasoned turn -- ``"claude"`` or
@@ -61,6 +64,7 @@ class Turn:
     language: str = "en"
     action: str = "unclear"
     args: dict = field(default_factory=dict)
+    steps: list = field(default_factory=list)
     spoken: str = ""
     path: str = "routed"
     source: str = "typed"
@@ -72,12 +76,15 @@ class Turn:
 
         The backend is in here because "that took four seconds" has different
         answers depending on whether it went to the phone or to the network,
-        and the log is the only place you can tell after the fact.
+        and the log is the only place you can tell after the fact. A turn that
+        did two things names both, for the same reason: a log that shows the
+        first one is how a dropped second one stays invisible.
         """
         total = sum(self.timings.values())
         stages = "  ".join(f"{k} {v:.0f}ms" for k, v in self.timings.items())
         via = f"{self.path}:{self.backend}" if self.backend else self.path
-        return (f"[{via}/{self.language}] {self.heard!r} -> {self.action} "
+        did = " + ".join(step.action for step in self.steps) or self.action
+        return (f"[{via}/{self.language}] {self.heard!r} -> {did} "
                 f"| {stages} | total {total:.0f}ms")
 
 
@@ -111,7 +118,7 @@ def handle(text: str, config, context=None,
     if match:
         turn.path = "routed"
         turn.language = match.language
-        action_name, args = match.action, match.args
+        turn.steps = list(match.steps)
     else:
         # --- Slow path: wake the model --------------------------------------
         turn.path = "reasoned"
@@ -132,7 +139,7 @@ def handle(text: str, config, context=None,
                                    memories=memories)
             turn.timings["model"] = decision.seconds * 1000
             turn.backend = decision.backend
-            action_name, args = decision.action, decision.args
+            turn.steps = list(decision.steps)
         except brain.BrainError as exc:
             log.error("%s", exc)
             # Several very different failures used to say the same thing.
@@ -156,15 +163,22 @@ def handle(text: str, config, context=None,
             return turn
 
     # --- Execute ------------------------------------------------------------
+    # In order, and every one of them. A step that fails does not stop the
+    # ones after it: they were separate requests, and «άναψε τον φακό και
+    # στείλε στη Μαρία» has no reason to leave the torch off because the
+    # message failed. Each step contributes its own sentence, so the reply
+    # says which half worked.
     started = time.perf_counter()
-    reply_key, fields = actions_module.execute(action_name, args, ctx)
+    results = [actions_module.execute(step.action, step.args, ctx)
+               for step in turn.steps]
     turn.timings["exec"] = (time.perf_counter() - started) * 1000
-    turn.action = action_name
-    turn.args = args
+    turn.action = turn.steps[0].action
+    turn.args = turn.steps[0].args
 
     # --- Answer -------------------------------------------------------------
     started = time.perf_counter()
-    turn.spoken = replies.say(reply_key, turn.language, **fields)
+    turn.spoken = replies.stitch(
+        [replies.say(key, turn.language, **fields) for key, fields in results])
     speech.speak(turn.spoken, turn.language, config)
     turn.timings["speak"] = (time.perf_counter() - started) * 1000
 
@@ -232,6 +246,7 @@ def build_context(config):
                          or actions_module.CALENDAR_ANSWER),
         contacts={k.lower(): v for k, v in
                   (config.get_path("contacts", {}) or {}).items()},
+        calendar_id=str(config.get_path("tasker.calendar_id", "") or ""),
         memory=Memory(config.expanded("memory.path") or None),
         country_code=str(config.get_path("memory.country_code", "") or ""),
     )

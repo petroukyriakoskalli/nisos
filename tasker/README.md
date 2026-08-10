@@ -4,7 +4,7 @@ Two directions across one bridge.
 
 | Direction | What crosses | Why it has to |
 |---|---|---|
-| nisos → Tasker | `dnd.on`, `calendar.next` | Android will not let a Termux process do either |
+| nisos → Tasker | `dnd.on`, `calendar.next`, `calendar.add` | Android will not let a Termux process do any of them |
 | Tasker → nisos | a hardware button | Termux has no way to watch the volume keys |
 
 Start here:
@@ -31,8 +31,63 @@ Both now work with Tasker uninstalled. That was worth doing on its own: it halve
 part of this integration that can only be tested on a phone.
 
 **What is left really is stuck here.** `cmd notification set_dnd` needs the shell UID,
-which Termux does not have. Calendars need `READ_CALENDAR`, which Termux does not
-declare and therefore cannot be granted. Tasker holds both.
+which Termux does not have. Calendars need `READ_CALENDAR` and `WRITE_CALENDAR`, which
+Termux does not declare and therefore cannot be granted. Tasker holds all three.
+
+---
+
+## Reading and writing the calendar
+
+Both halves go the same way — the calendar provider, through Tasker's shell, which is
+where the permission lives:
+
+| Action | What it does | Answer |
+|---|---|---|
+| `calendar.next` | `content query` for the next 7 days | `{"summary": …, "minutes": …}` |
+| `calendar.add` | `content insert` into `events` | `{"ok": true}` |
+
+`calendar.add` needs `ok` in its answer, and that is not ceremony. An older
+`NisosAction` — one that has never heard of `calendar.add` — falls into its own
+else-branch and writes a perfectly well-formed answer saying it did nothing. Requiring
+a field the old branch cannot produce is what turns *"it silently didn't happen"* into
+*"that didn't work"* out loud. **If you have imported this task before, import it
+again**, or appointments will fail with exactly that message.
+
+Which calendar it writes to: the task picks the first one with an access level of 500
+or more (`CAL_ACCESS_CONTRIBUTOR`; anything below can be read but not written). On a
+phone with several accounts that is a coin toss, so pin it with `calendar_id` under
+`[tasker]` in `config.toml`. To find the number:
+
+```bash
+content query --uri content://com.android.calendar/calendars \
+  --projection _id:account_name:calendar_displayName
+```
+
+### If your device refuses the insert
+
+Tasker has a **Calendar Insert** action, and it is the belt-and-braces route — it does
+its own permission handling rather than going through a shell. A JavaScriptlet cannot
+invoke one and hand it three separate fields, so it needs a second task, the way
+`NisosDnd` works. Two minutes:
+
+```
+Tasks → + → NisosCalendarAdd
+  + → Misc → Calendar Insert
+      Title        %par1
+      Start Date   %par2      ← "Start Time" too, if your Tasker splits them
+      Duration/End 1 hour
+```
+
+Then change the one line in `NisosAction` that does the insert to:
+
+```js
+performTask("NisosCalendarAdd", 10, title, formatted);
+answer({ ok: true });
+```
+
+where `formatted` is the start as a date string rather than the milliseconds nisos
+sends. You lose the exact duration this way, which is why it is the fallback and not
+the default.
 
 ---
 
@@ -100,6 +155,13 @@ Same shape as adding one to nisos itself — one branch here, matching the
     answer({ summary: "done", minutes: 0 });   // only if nisos waits for a reply
 }
 ```
+
+> ⚠️ **Two characters cannot appear in that file**: a bare `<`, which XML reads as the
+> start of a tag, and `&`, which starts an entity. Either one makes the task fail to
+> import, and it looks like perfectly ordinary JavaScript. Escaping them is not the fix
+> — you are also told above to paste this block in by hand, where `&lt;` arrives as
+> literal broken code. Write `for (var i in rows)` instead of a counted loop and nest
+> your `if`s instead of using `&&`. `tests/test_tasker.py` fails if either slips in.
 
 ---
 
@@ -193,10 +255,16 @@ order matters — these fail in a way that looks identical from nisos' side:
 | Flash, but no file | Tasker lacks **All files access** (Settings → Apps → Tasker → Permissions) |
 | Works, then stops after a while | Tasker is being killed — turn off battery optimisation for it |
 | `calendar.next` says "nothing" | Tasker lacks the **Calendar** permission, or there genuinely is nothing in 7 days |
+| `calendar.add` says "that didn't work" | An older `NisosAction` with no `calendar.add` branch — re-import it |
+| `calendar.add` flashes "no writable calendar" | Tasker lacks the Calendar permission, or every calendar on the phone is read-only |
 | DND does nothing | Tasker needs **Do Not Disturb access** (Settings → Notifications) |
 | Everything works from the terminal, nothing from a button | **Terminal** is still checked in the Termux:Tasker action |
 
-The calendar branch is the one piece of this that could not be verified without a
-device — it queries the calendar provider through Tasker's shell, which is the only
-route available given Tasker has an insert action but no read action. If it comes back
-empty with entries clearly in your calendar, that is the thing to report.
+The two calendar branches are the pieces of this that could not be verified without a
+device. Both reach the calendar provider through Tasker's shell — the only route
+available for reading, since Tasker has an insert action but no read action, and the
+route chosen for writing too so that there is one mechanism to check rather than two.
+If `calendar.next` comes back empty with entries clearly in your calendar, or
+`calendar.add` fails while Tasker plainly holds the permission, those are the things to
+report — and the hand-built **Calendar Insert** task above is the fallback for the
+second one.

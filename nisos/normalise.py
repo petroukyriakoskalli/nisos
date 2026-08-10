@@ -26,6 +26,7 @@ import unicodedata
 
 __all__ = [
     "normalise",
+    "Normalised",
     "strip_accents",
     "script_of",
     "parse_number",
@@ -92,12 +93,55 @@ def strip_accents(text: str) -> str:
     return "".join(c for c in decomposed if unicodedata.category(c) != _COMBINING)
 
 
-def normalise(text: str) -> str:
+class Normalised(str):
+    """Flattened text that still remembers how the user actually spelled it.
+
+    A plain string everywhere it matters -- it compares, slices, formats and
+    gets matched by a regex exactly like one -- with a single addition:
+    :meth:`original`, which hands back the user's own spelling of a range of
+    words.
+
+    Why it has to exist. Patterns are written against flattened text, so that
+    is what the router matches and what the argument builders are handed. That
+    is right for *matching* and wrong for anything that ends up **written
+    down**: a calendar entry titled «οδοντιατρο» rather than «οδοντίατρος» is
+    the assistant's internal plumbing leaking into your diary. Speech does not
+    have this problem, because a reply is composed from a template you wrote.
+
+    Word positions rather than character offsets, deliberately. Flattening is
+    not length-preserving -- an accent that arrives as a separate combining
+    character costs a character and no words -- but it never splits or joins a
+    word, so the two word lists always line up. When they somehow don't, the
+    flattened words are used and the worst case is the old behaviour.
+    """
+
+    def __new__(cls, flattened: str, raw: str | None = None) -> "Normalised":
+        self = super().__new__(cls, flattened)
+        self.raw = flattened if raw is None else raw
+        candidate = self.raw.split()
+        self.raw_words = (candidate if len(candidate) == len(flattened.split())
+                          else flattened.split())
+        return self
+
+    def original(self, indices) -> str:
+        """The user's own spelling of the words at `indices`, in order.
+
+        >>> Normalised("αναψε τον φακο", "Άναψε τον φακό").original([2])
+        'φακό'
+        """
+        return " ".join(self.raw_words[i] for i in sorted(indices)
+                        if 0 <= i < len(self.raw_words))
+
+
+def normalise(text: str) -> Normalised:
     """Flatten a transcript into the form the router patterns are written against.
 
     Lowercases, strips accents, unifies final sigma, and collapses runs of
     whitespace. Harmless on English input, so the pipeline can call it once and
     hand the result to both language tables.
+
+    Returns a :class:`Normalised`, which is a string in every way that matters
+    and additionally knows what it was flattened from.
 
     >>> normalise("Άναψε τον Φακό!")
     'αναψε τον φακο!'
@@ -107,7 +151,7 @@ def normalise(text: str) -> str:
     lowered = text.lower()
     unaccented = strip_accents(lowered)
     unified = unaccented.replace("ς", "σ")
-    return re.sub(r"\s+", " ", unified).strip()
+    return Normalised(re.sub(r"\s+", " ", unified).strip(), text)
 
 
 def script_of(text: str) -> str | None:
