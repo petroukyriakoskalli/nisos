@@ -72,6 +72,7 @@ ui/       Compose. The reactor, and one screen.
 | `core/Router.kt` | The two regex tables — the fast path | `nisos/router.py` |
 | `core/Replies.kt` | What it says back, in both languages | `nisos/replies.py` |
 | `core/Actions.kt` | The catalogue, and the `Phone` interface | `nisos/actions.py` |
+| `core/Money.kt` | Balances, from sources that cannot move money | new |
 | `core/Cloud.kt` | The Claude client — one forced tool call | `nisos/cloud.py` |
 | `core/Loop.kt` | Orchestration — the only file that knows the order | `nisos/loop.py` |
 | `android/AndroidPhone.kt` | Every platform call | replaces `tasker/` entirely |
@@ -147,9 +148,10 @@ two chips is the proof.
 
 ## What still needs doing
 
-- `money.total` — the reason the app exists, and not written yet.
+- A settings screen for the Wise token and the bank SMS senders. Both have
+  setters and no UI, so today only the manual figure source is reachable.
+- Revolut, which has no personal API and needs an open-banking consent flow.
 - An assist-gesture handoff that starts listening immediately rather than
   waiting for the button.
-- A settings screen. Today the key is set in code paths only; the voice
-  preference is a field with no UI in front of it.
+- The voice preference is a field with no UI in front of it.
 - Nothing here has run on a phone yet.

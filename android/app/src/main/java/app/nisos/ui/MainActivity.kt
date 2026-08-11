@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -108,6 +109,14 @@ private fun Assistant(model: AssistantViewModel) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    // Android 15 draws every app edge to edge whether it asked
+                    // to or not, so the window is taller than the part you can
+                    // actually see and the layout has to subtract the system
+                    // bars itself. Without this the bottom row -- type,
+                    // language, key -- sits underneath the navigation bar,
+                    // half legible and completely untappable, which is exactly
+                    // how it shipped and exactly what the first run showed.
+                    .safeDrawingPadding()
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween,
