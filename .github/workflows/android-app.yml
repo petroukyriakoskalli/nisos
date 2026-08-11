@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -73,6 +73,43 @@ jobs:
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
+
+      # A rolling release, so the phone has one URL that never changes:
+      #
+      #   github.com/petroukyriakoskalli/nisos/releases/latest/download/nisos.apk
+      #
+      # An artifact cannot be that. It is a zip rather than an APK, so it needs
+      # unpacking; it expires after 30 days; and downloading one requires being
+      # signed into GitHub even on a public repository. A release asset has
+      # none of those problems -- it is a direct, permanent, anonymous link to
+      # the newest build, which is the difference between six steps on the
+      # phone and one tap.
+      - name: Publish as the rolling latest build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          cp "$APK" nisos.apk
+
+          NOTES="Build ${{ github.run_number }} from \`${{ github.ref_name }}\` (${GITHUB_SHA:0:7}).
+
+          **Install:** tap \`nisos.apk\` below. It replaces any earlier build in
+          place -- same signing key, so your permissions and stored key survive
+          and there is nothing to uninstall first.
+
+          Debug-signed. Play Protect will call it unrecognised; that is what
+          sideloading looks like."
+
+          # Recreate rather than edit: `gh release edit` cannot move a tag that
+          # already points somewhere else, and a stale tag is how a "latest"
+          # link quietly starts serving last week's build.
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest nisos.apk \
+            --title "Latest build" \
+            --notes "$NOTES" \
+            --prerelease \
+            --target "$GITHUB_SHA"
 
       - name: Upload the test report
         if: failure()

@@ -14,7 +14,11 @@ android {
         // below that is a phone from 2017. Nothing here needs to run on one.
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
+        // Taken from the CI run number so every build is a distinct version.
+        // Android will happily reinstall over an equal versionCode, but an
+        // updater watching for a *newer* one needs the number to actually
+        // move -- and "which build is on the phone" should be answerable.
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0) + 10
         versionName = "0.6.0"
     }
 
