@@ -105,10 +105,14 @@ jobs:
           # already points somewhere else, and a stale tag is how a "latest"
           # link quietly starts serving last week's build.
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          # NOT a prerelease, deliberately. The /releases/latest/ pointer skips
+          # prereleases, so marking this one sent that URL to the last tagged
+          # release instead -- which here is v0.2.6, a set of Termux binaries
+          # for a program that no longer exists. The stable link 404'd while
+          # the APK sat one tag away, which is the worst kind of broken.
           gh release create latest nisos.apk \
             --title "Latest build" \
             --notes "$NOTES" \
-            --prerelease \
             --target "$GITHUB_SHA"
 
       - name: Upload the test report
