@@ -33,15 +33,24 @@ is an ordinary app — which can just *ask* for the permissions.
 That last row is the honest cost, and it is a real one. See
 [What it gives up](#what-it-gives-up).
 
+## Installing it
+
+One permanent link, on the phone:
+
+**<https://github.com/petroukyriakoskalli/nisos/releases/latest/download/nisos.apk>**
+
+Every green build replaces what that URL serves, so installing and updating are
+the same two taps. It goes on over the top — same debug signing key, so
+permissions and the stored API key survive and nothing needs uninstalling.
+
+There is no way to skip the install itself; Android requires one for any code
+change. What the rolling release removes is the five steps around it — the zip,
+the GitHub sign-in, the hunt through workflow runs, the thirty-day expiry.
+
 ## Building it
 
-There is nothing to build locally unless you want to. **Every push builds an
-APK in CI** and attaches it as an artifact — see
+Nothing needs building locally. **Every push builds and publishes** — see
 [.github/workflows/android-app.yml](../.github/workflows/android-app.yml).
-
-```
-Actions → "Android app" → the latest run → Artifacts → nisos-apk
-```
 
 Locally, with Android Studio or a command-line SDK:
 
@@ -53,9 +62,25 @@ gradle assembleDebug
 gradle installDebug     # onto a connected phone
 ```
 
-The APK is debug-signed. It is sideloaded from a CI artifact rather than
-shipped through a store, so a release key would be ceremony — and a signing
-secret in a public repository is a real cost with no benefit.
+The APK is debug-signed. It is sideloaded rather than shipped through a store,
+so a release key would be ceremony — and a signing secret in a public
+repository is a real cost with no benefit.
+
+## What has actually been proven on a phone
+
+Honest ledger, because everything else here is an argument rather than
+evidence:
+
+| | |
+|---|---|
+| ✅ It installs, launches and renders | first run, 2026-08-10 |
+| ✅ The reactor ring draws correctly | arc, glow, inner rings, 72 ticks |
+| ✅ `router only · no key` reports the real state | header |
+| ❌ The controls were behind the navigation bar | fixed in build 5 — Android 15 draws edge to edge and the layout was not subtracting the system bars |
+| ⬜ Everything else | the eleven commissioning tests, not yet run |
+
+No spoken turn has happened yet. The microphone, the recogniser, the voice, the
+calendar and every action are unverified on hardware.
 
 ## Layout
 
@@ -154,4 +179,3 @@ two chips is the proof.
 - An assist-gesture handoff that starts listening immediately rather than
   waiting for the button.
 - The voice preference is a field with no UI in front of it.
-- Nothing here has run on a phone yet.
