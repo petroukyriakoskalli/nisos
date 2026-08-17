@@ -1,5 +1,315 @@
 # Changelog
 
+## v0.6.0 — 2026-08-10
+
+### Added
+
+- **`money.total`.** Balances, from sources that cannot move money — a
+  read-only token, a message the bank already sent you, a figure you typed in.
+  That constraint is the design and not a caveat on it: a credential that can
+  move money, sitting on a phone behind a screen lock, is a different risk
+  category from a token that can only read a number, and the assistant gains
+  nothing from the difference. It only ever needed to read.
+
+  Cyprus banks are covered by parsing their balance SMS (no personal API, but
+  they text you after every card transaction and the message is already on the
+  phone). Wise by a read-only personal token. myEurolife by a figure you tell
+  it, because insurance and pension portals have no public API and it is that
+  or nothing. Revolut needs open banking and is not built.
+
+  Two refusals worth knowing. **One source cannot take the total down** — a
+  source that can't answer is skipped, and one that throws is caught, because
+  one unreachable bank turning "you have €12,340" into "that didn't work" for
+  three reachable accounts is the worst outcome available. And **a partial
+  total never sounds complete**: three of four says "(3 of 4)" out loud, a
+  stale reading gets dated, and another currency is mentioned rather than
+  converted, since converting needs a live rate this app must not guess.
+
+  The SMS parser requires a balance *word* within 40 characters of the amount,
+  so "You spent EUR 45.20 at LIDL" yields nothing on purpose — a transaction
+  text names two numbers and taking the wrong one is a confidently wrong
+  balance. `READ_SMS` is requested only when you first name a bank sender,
+  never at launch.
+
+### Removed
+
+- **Termux, and everything that existed only to work around being a terminal
+  program**: the Python package and its 288 tests, the Tasker bridge, twelve
+  shell scripts, the GBNF grammar, the llama.cpp/whisper.cpp cross-compile
+  workflow, and the config file that configured all of it.
+
+  None of it was bad code. It was the right design for a constraint that no
+  longer exists — reasoning had to run on the phone, so a 4B model had to run
+  on the phone, so it had to be Termux, so every permission Android reserves
+  for apps had to be borrowed from Tasker through a broadcast that cannot
+  return a value. Take away the local model and the whole chain unwinds.
+
+  ⚠️ This is ahead of the evidence: the gate was an APK on the phone with the
+  Greek, multi-action and calendar tests passing, and that has not happened.
+  Recovery is `git checkout feature/multi-action`, which is pushed.
+
+## v0.5.0 — 2026-08-10 — an Android app
+
+### Added
+
+- **`android/` — nisos as an APK.** Same assistant, no Termux, no Tasker.
+
+  The online brain is what made this possible, and it is worth being precise
+  about why. Termux was never the design; it was the only way to run
+  llama.cpp and whisper.cpp on a phone. Every awkward thing about the install
+  traced back to those two binaries — the 2.5 GB download, the cross-compile
+  in CI, the fifty-minute setup. Send reasoning to the API and there is no
+  native code left; with no native code this is an ordinary app, and an
+  ordinary app can simply **ask for the permissions**.
+
+  That deletes the whole `tasker/` bridge in one go. `READ_CALENDAR` and
+  `WRITE_CALENDAR` are two lines in a manifest, and they replace: a broadcast,
+  a JavaScriptlet, an answer file on `/sdcard`, a polling loop, the
+  stale-answer trap, the `ok`-field handshake, and an entire class of failure
+  where Tasker silently was not running. `calendar.next` is a cursor.
+  `calendar.add` is an insert.
+
+- **`core/` has no Android imports anywhere.** That is the load-bearing rule of
+  the port: the router, the time parser, the reply tables and the action
+  registry all run in a plain JVM unit test in about a second, exactly as the
+  Python does. The platform lives behind one `Phone` interface, which the
+  tests replace with a recorder. Every assertion the Python suite makes about
+  routing, splitting, appointments and stitched replies is asserted again in
+  Kotlin — the tables were retyped into another language, and a regex that
+  quietly stopped matching would be invisible until you were standing in a
+  dark room asking for the torch.
+
+- **A voice with the right register.** Not a clone of a named actor — that
+  needs a model trained on their recordings, which is a large download and
+  somebody's likeness, and does not belong in a public repository. What it
+  does is pick Google's en-GB male voices (`en-gb-x-rjs`, `en-gb-x-gbb`),
+  pitch to 0.90 and slow to 0.96, which is most of what makes that delivery
+  recognisable. Local voices are preferred over network ones on purpose: the
+  network voices sound marginally better and add a round trip to every reply.
+  ⚠️ Greek gets the best `el-GR` voice available and sounds like a different
+  person, because it is one.
+
+- **A reactor HUD, drawn rather than shipped.** Arcs, a radial gradient and 72
+  ticks on a Canvas — no image assets, no animation library. The inner ring is
+  driven by the **actual microphone amplitude**, so it reacts to your voice
+  instead of playing a canned animation. Five states with distinct colours,
+  because "is it hearing me", "did it freeze" and "did that fail" are
+  different questions and a spinner answers none of them. Under the reply,
+  one chip per action — a turn can now do two things and a single spoken
+  sentence does not prove it did both.
+
+- **CI is the build machine.** `.github/workflows/android-app.yml` runs the
+  unit tests, assembles a debug APK and uploads it as an artifact. Debug-signed
+  deliberately: this is sideloaded, not shipped through a store, so a release
+  key would be ceremony and a signing secret in a public repository is a real
+  cost. No Gradle wrapper jar is committed for the same reason — an unreadable
+  binary in a public repo, replaced by one line in the workflow.
+
+### What it gives up
+
+Worth stating plainly, because the README could easily imply otherwise:
+
+- **Reasoning now needs a network.** There is no local model in the app. The
+  router still answers the great majority of commands entirely on the phone
+  and «άναψε τον φακό» sends nothing anywhere — but this app is *less* offline
+  than the Termux version. `backend = "llama"` over there remains the fully
+  private option.
+- **Automatic language detection.** Whisper went with the rest of the native
+  code, so there is a language toggle. It matters less than it sounds: the
+  router decides the language from which table matched, not from what the
+  recogniser assumed, so the toggle corrects itself after one Greek sentence.
+- **The key is not encrypted at rest.** App-private storage keeps other apps
+  out, which is the threat this needs to hold off. It is not protection
+  against someone holding your unlocked phone.
+
+### Not verified
+
+- **Nothing here has run on a phone**, and nothing has been compiled on this
+  laptop either — there is no Android SDK on it, which is why CI exists. The
+  first green build is the first time any of this Kotlin has been checked by a
+  compiler rather than by reading.
+- The Python program is unchanged and remains the reference implementation.
+
+## v0.4.0 — 2026-08-10
+
+### Added
+
+- **A turn can do more than one thing.** The demo at the top of the README —
+  «βάλε χρονόμετρο δώδεκα λεπτά και άναψε τον φακό» — lit the torch and dropped
+  the timer without a word. It had done that since the first commit, in the one
+  example everybody reads first.
+
+  A turn is now a **list of steps**, all the way through: `Match.steps` out of
+  the router, `Decision.steps` out of either brain, `Turn.steps` in the log
+  line, run in order and answered in one sentence. `action` and `args` stay
+  exactly where they were on all three, pointing at the first step, so nothing
+  that reads them had to change and a one-action turn is byte-for-byte what it
+  always was — including the spoken reply, which is why `replies.stitch`
+  returns a single part untouched rather than joining it with itself.
+
+  The safety of the whole thing rests on one rule: **a sentence is split only
+  when every piece routes on its own.** «στείλε στη Μαρία ότι άργησα και θα
+  φάμε αργότερα» splits into a command and a fragment, the fragment routes
+  nowhere, the split is thrown away, and it stays one message with «και» inside
+  it. Cutting a message in half would be a far worse bug than the one this
+  fixes, so the conservative direction is the default one. Beyond four pieces
+  it does not split at all — five orders in one breath is far likelier to be a
+  sentence with five «και»s in it.
+
+  A step that fails does not cancel the ones after it. They were separate
+  requests, and there is no reason for the torch to stay off because a message
+  failed; the reply says which half worked.
+
+  Both brains had to be able to *express* a second action, or the model has
+  nowhere to put one and the ceiling is the schema rather than the model. The
+  GBNF root is now a list (with the single-object form still legal, because a
+  4B model that has seen the old shape a thousand times will reach for it), and
+  the tool schema takes `steps`. One reader, `brain.steps_from`, is shared by
+  both, so the two brains cannot disagree about the same JSON.
+
+- **`calendar.add`** — «βάλε στο ημερολόγιο οδοντίατρο αύριο στις πέντε»,
+  "book a meeting with Nikos tomorrow at half past five". The write half of a
+  bridge that could only read.
+
+  The interesting part is not the Tasker call, it is **`nisos/when.py`**:
+  spoken time into a real datetime, pure and testable on a laptop, which is
+  where the judgement calls live. A bare hour of one to seven means the
+  afternoon — «στις πέντε» is 17:00, because nobody arranges a dentist for five
+  in the morning and says it that casually. A day with no time gets 09:00. A
+  time with no day is the next time that time happens. Each of those is one
+  sentence you can say out loud when it gets something wrong, which is worth
+  more than being clever.
+
+  The title is subtracted rather than captured: everything that is neither the
+  instruction nor the time is the name of the appointment. That is what makes
+  «βάλε ραντεβού με τον γιατρό αύριο» and "put the dentist in my calendar
+  tomorrow" both work without agreeing on word order.
+
+  It reads the appointment back — the day it landed on and the hour it picked
+  are exactly the two things most likely to be wrong and the two you cannot see
+  until you open the calendar.
+
+- **`Normalised`**, a string that remembers its own spelling. Patterns are
+  matched against flattened text, which is right for *matching* and wrong for
+  anything that gets **written down**: a calendar entry titled «οδοντιατρο»
+  instead of «οδοντίατρος» is the assistant's plumbing leaking into your diary.
+  Argument builders can now ask for the user's own words back. Word positions
+  rather than character offsets, because flattening is not length-preserving
+  but never splits or joins a word.
+
+- **The clock now travels with every reasoned request.** "Tomorrow at five" is
+  unanswerable otherwise — a model has no clock. It goes in the *user* turn on
+  both brains, never the system block, which would break the API's prompt cache
+  on every single turn and llama-server's `cache_prompt` once a minute.
+
+- **`tests/test_tasker.py`.** The Tasker XML cannot contain a `<` or an `&` —
+  one is a tag, the other is an entity, and either makes the task fail to
+  import while looking like perfectly ordinary JavaScript. Escaping is not the
+  fix, because the README also tells you to paste that block in by hand. There
+  is now a test, and a second one asserting every action nisos broadcasts has a
+  branch waiting for it.
+
+### Changed
+
+- The log line names every action a turn ran (`torch.on + time.read`). A log
+  that shows only the first is precisely how a dropped second one stays
+  invisible for eleven versions.
+- `calendar.next` and `calendar.add` share the answer-file wait, and the
+  stale-answer delete that goes with it.
+
+### Not verified
+
+- **Nothing here has run on a phone**, and `calendar.add`'s Tasker branch is
+  the piece that cannot be checked anywhere else. It inserts through the
+  calendar provider using Tasker's shell — the same mechanism `calendar.next`
+  already used, chosen so there is one route to verify rather than two. Tasker's
+  own **Calendar Insert** action is the fallback if a device refuses it, and
+  `tasker/README.md` has the two-minute hand-built task and the one line to
+  change.
+- ⚠️ **Re-import `NisosAction`.** An older copy has no `calendar.add` branch;
+  it will answer, and the answer will not say `ok`, so appointments fail with
+  "that didn't work" rather than silently going nowhere.
+
+## v0.3.0 — 2026-08-10
+
+### Added
+
+- **An online brain.** A phrase the router misses can now go to the Claude API
+  instead of the local 4B model. `brain.backend` chooses: `claude`, `llama`, or
+  `auto` — the new default, meaning online when a key is present and dropping
+  back to llama-server if the network is gone *and* it happens to be running.
+  Set `backend = "llama"` for exactly the old behaviour.
+
+  What this buys is answers that are actually good and Greek that is actually
+  Greek — the reasoned path's weakest point since the beginning. What it costs
+  is a network, a key, tokens per turn, and the transcript of an unrecognised
+  phrase leaving the phone. Routed commands are unaffected: ~80% of what you say
+  still never reaches a model of any kind, and «άναψε τον φακό» sends nothing
+  anywhere.
+
+  The online equivalent of the GBNF grammar is a **forced `tool_choice`**: one
+  tool whose input schema is the action object, and the model is required to
+  call it. Same guarantee reached a different way — it cannot answer in prose
+  and cannot invent a verb outside the enum, which is generated from the action
+  registry so a new action needs no second edit here. Raw `urllib`, not the
+  official SDK: the SDK needs pydantic, whose core is Rust, and Termux has no
+  wheel for it — the no-dependencies rule stands.
+
+- **`python -m nisos --set-key`** (and `--forget-key`), plus **`k`** in the
+  console menu. The key is read from **stdin**, never an argument — an argument
+  is visible in `ps` and lands in the history file — and stored 0600 in
+  `~/.nisos/anthropic-key`, deliberately not in `config.toml`, which is a file
+  you paste into bug reports. Storing it immediately checks it against
+  `GET /v1/models/<model>`, which validates the key, the network *and* the model
+  name at once, for free, without generating a token.
+
+- **`NISOS_ONLINE=1 bash scripts/bootstrap.sh`** — an install with no local
+  model: no 2.5 GB download, no waiting for one, and one paste for the key at
+  the end. About 15 minutes rather than 50. It reuses the existing
+  `NISOS_SKIP_MODEL` path rather than adding a second one, so resume behaves
+  exactly as before.
+
+- **`--print-backend`**, and `scripts/nisos.sh` now asks it before starting
+  anything. An online install no longer loads a 2.5 GB model on the first turn
+  after a reboot only to leave it idle. The check costs one Python start and is
+  paid *only* on the branch where llama-server isn't already answering, so the
+  common path is untouched.
+
+- **`--backend claude|llama|auto`** to override the config for one run, which is
+  how you compare the two on the same phrase.
+
+### Changed
+
+- **Four different failures used to share one apology.** "Can't do that
+  offline" was already wrong for a stopped llama-server (fixed in 0.2.5), and
+  the online brain adds two more: no key, and a request the API declined.
+  `BrainError` now carries the reply it deserves, so a missing key says «Λείπει
+  το κλειδί» instead of blaming a network with four bars — and the 1-second
+  llama probe is skipped entirely when the reason is already known.
+- **`--check` only checks what your configuration needs.** On an online install
+  there is no local model to find and no grammar to load, and a report that kept
+  demanding them would fail forever and teach you to ignore it. llama-server
+  shows as `[opt ]` there, because it is then only the fallback. Whisper rows
+  are skipped when `stt.strategy = "android"`.
+- The log line names which brain answered — `[reasoned:claude/el]`. "That took
+  four seconds" has different answers depending on where it went, and the log is
+  the only place you can tell afterwards.
+- The web UI's status pill and the console header say `online` / `on the phone`.
+  The wording is decided server-side, so exactly one place knows it.
+
+### Not verified
+
+- **No successful API call has been made from this checkout.** The endpoint,
+  headers and error handling are confirmed live — a real HTTP 401 came back from
+  `api.anthropic.com` with its message intact — but nobody has run a turn with a
+  valid key, so the request *body* is code-verified against the API
+  documentation only. The two opt-in parts (`fallbacks`, and
+  `thinking`/`effort`) are what would 400 if any of that is wrong; each clears
+  in one line, and an HTTP 400 now says so explicitly rather than leaving you to
+  find out.
+- Nothing here has run on the phone. Online timings are left blank in the README
+  rather than guessed.
+
 ## v0.2.6 — 2026-07-27
 
 ### Fixed

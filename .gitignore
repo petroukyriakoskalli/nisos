@@ -30,3 +30,12 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Android build output. `.gradle/` is a cache and `build/` is generated; the
+# APK you want is a CI artifact, not something committed.
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.apk

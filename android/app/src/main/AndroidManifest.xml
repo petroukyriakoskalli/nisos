@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Every permission here is one Termux could not hold, or could only reach
+      by asking Tasker to do it. That is the entire argument for this app
+      existing: READ_CALENDAR and WRITE_CALENDAR are two lines in a file, and
+      they delete a bridge made of broadcasts, a JavaScriptlet and an answer
+      file on shared storage.
+
+      RECORD_AUDIO   the microphone, for the recogniser
+      SEND_SMS       «στείλε στη Μαρία» — sends without a tap, unlike WhatsApp
+      READ_CONTACTS  turning a spoken name into a number
+      *_CALENDAR     calendar.next and calendar.add, natively
+      CAMERA is NOT here: setTorchMode has needed no permission since API 23.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!--
+      READ_SMS is for money.total only: Cyprus banks text you a balance after
+      every card transaction, and that message is already on the phone. It is
+      also access to every message you have, so unlike the permissions above it
+      is NOT requested at launch — it is asked for the first time you name a
+      bank sender, and never otherwise. Declared here because a runtime request
+      is impossible without it, not because the app wants it.
+    -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+
+    <!-- Android 11+ hides other apps unless you say which you need to see. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Nisos">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Nisos"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+              Lets the phone's own "assist" gesture open it — long-press home,
+              or a side-key double press mapped to the assistant. This is the
+              trigger Termux could never have: the back-tap and volume-key
+              recipes in tasker/README.md are all workarounds for not being
+              able to declare this one line.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
