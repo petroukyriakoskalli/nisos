@@ -1,5 +1,85 @@
 # Changelog
 
+## v0.7.0 — 2026-08-10
+
+### Fixed
+
+- **The controls were drawn on top of the ring.** Found on a Samsung S25 Ultra,
+  and the second layout bug that only a phone could show.
+
+  Two things caused it together. `Reactor` was a hard-coded **260 dp**, so it
+  could not give way; and the screen's outer `Column` used
+  `Arrangement.SpaceBetween`, which divides the *leftover* space between its
+  children. When there is no leftover the share it hands out goes **negative**,
+  so the three blocks were laid on top of one another — and because a `Column`
+  draws in order, the controls were painted over the ring and over the text.
+
+  It needed a trigger, which is why the arithmetic looks fine on paper: opening
+  `type` or `key` added ~118 dp each, and the soft keyboard takes ~300 dp more
+  (`safeDrawing` covers the IME as well as the system bars). Any of those turns
+  spare space negative.
+
+  The middle block now carries the weight, so it absorbs whatever is spare and
+  shrinks when there is none — there is never a negative gap to distribute. The
+  ring is measured against the room that actually exists and passed a diameter;
+  below 120 dp it is not drawn at all, on the grounds that a ring over the top
+  of the text is worse than no ring. Anything still too tall scrolls, which is
+  the one outcome that cannot hide a control behind a graphic. The spoken reply
+  is capped at three lines for the same reason: it sits above the Speak button
+  with no weight of its own, so a long one used to push the button off-screen.
+
+### Added
+
+- **A settings screen.** Three of the four money sources were unreachable:
+  Wise needs a token and the bank sources need sender names, and both had
+  setters in `Memory` with no UI in front of them — so «πόσα λεφτά έχω» could
+  only ever count figures dictated by hand.
+
+  It also does the thing a settings screen is usually bad at, which is letting
+  you **check** rather than only set. **Check sources now** reads every source
+  and reports each one separately, because the spoken total says "3 of 4"
+  without saying *which* four, and a reply you have to trigger by talking is the
+  wrong place to debug a token — especially the Wise one, which has still never
+  been tried against the real API. A dead token, a revoked permission and a bank
+  that simply has not texted you lately are now three visibly different
+  outcomes instead of one silence.
+
+  `READ_SMS` is still requested only when you name your first bank sender, never
+  at launch, and the screen says plainly when senders are configured but the
+  permission is not granted — previously that combination failed silently.
+
+- **The voice is adjustable, and audible before you commit to it.** The name,
+  pitch and speed were fields on `Voice` with sensible defaults and nothing able
+  to reach them; they are now persisted in `Memory` and survive a restart, which
+  they did not before. **Say something** speaks a sample, because
+  `en-gb-x-rjs-local` tells you nothing about how a voice sounds, and tuning two
+  interacting sliders by waiting for the next real reply is no way to do it.
+  Every value has a `reset` back to the recommended one, the range is narrow
+  enough that a slider cannot make it unlistenable, and the list puts en-GB
+  first — a phone carries a dozen English voices and sorting by name buries the
+  two this is arguing for under Australian.
+
+### Changed
+
+- **The API key moved out of the bottom row and into settings.** It is
+  configuration rather than an operation, the header already announces when it
+  is missing, and that row was one of the things crowding the bottom of the
+  screen. The way in to settings is the header's own state label — the door next
+  to the thing that makes you want it.
+
+- **`SmsBalanceSource.addSender` is in `core/`, and tested.** The rule is that a
+  bank cannot be added twice in a different case: Android's SMS query is
+  `ADDRESS LIKE '%name%'` and therefore case-blind, so "boc" alongside "BOC"
+  would be two sources reading the same message and the bank counted **twice**
+  in the total. Two sources answering reads as better-attributed rather than
+  worse, so nobody would ever question the number. It went into `core/` rather
+  than the screen for the usual reason: a rule that cannot be tested is a rule
+  you find out about later.
+
+- `Memory.forgetBalance`, so a manual figure can be taken back out. A stale one
+  is worse than a missing one — it still counts, so the total keeps quoting a
+  policy you cashed in months ago.
+
 ## v0.6.0 — 2026-08-10
 
 ### Added

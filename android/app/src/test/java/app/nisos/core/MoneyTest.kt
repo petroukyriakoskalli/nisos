@@ -240,6 +240,42 @@ class MoneyTest {
         assertNull(n(""))
     }
 
+    // -- the sender list -----------------------------------------------------
+
+    @Test fun `a sender is added and trimmed`() {
+        assertEquals(listOf("BOC"), SmsBalanceSource.addSender(emptyList(), "  BOC  "))
+        assertEquals(
+            listOf("BOC", "Hellenic"),
+            SmsBalanceSource.addSender(listOf("BOC"), "Hellenic"),
+        )
+    }
+
+    /**
+     * The one that matters. Android's SMS query is `ADDRESS LIKE '%name%'` and
+     * therefore case-blind, so "boc" alongside "BOC" would be two sources
+     * reading the same message -- and the bank counted twice in the total. Two
+     * sources answering reads as *better* attributed, so nobody would question
+     * the number.
+     */
+    @Test fun `the same bank cannot be added twice in a different case`() {
+        assertNull(SmsBalanceSource.addSender(listOf("BOC"), "boc"))
+        assertNull(SmsBalanceSource.addSender(listOf("BOC"), "BOC"))
+        assertNull(SmsBalanceSource.addSender(listOf("Hellenic"), "  hellenic "))
+    }
+
+    @Test fun `an empty name is refused`() {
+        assertNull(SmsBalanceSource.addSender(emptyList(), ""))
+        assertNull(SmsBalanceSource.addSender(emptyList(), "   "))
+    }
+
+    /** Two banks whose names merely resemble each other are still two banks. */
+    @Test fun `a different sender is not a duplicate`() {
+        assertEquals(
+            listOf("BOC", "BOCX"),
+            SmsBalanceSource.addSender(listOf("BOC"), "BOCX"),
+        )
+    }
+
     // -- routing -------------------------------------------------------------
 
     @Test fun `the question routes in both languages`() {

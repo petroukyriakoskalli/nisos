@@ -126,6 +126,21 @@ class Memory(context: Context) {
     fun balanceAccounts(): List<String> =
         facts.all.keys.filter { it.startsWith(MONEY) }.map { it.removePrefix(MONEY) }.sorted()
 
+    /**
+     * Drop a manual figure.
+     *
+     * Needed because a stale manual balance is worse than a missing one: it
+     * still counts towards the total, so "you have €12,340" keeps quoting a
+     * policy you cashed in months ago. Voice can add one but had no way to take
+     * one back out -- the settings screen does.
+     */
+    fun forgetBalance(account: String): Boolean {
+        val key = account.lowercase().trim()
+        val existed = facts.contains("$MONEY$key")
+        facts.edit().remove("$MONEY$key").remove("$MONEY_AT$key").apply()
+        return existed
+    }
+
     /** Senders whose texts get read for a balance. Empty means none, and
      *  READ_SMS is never requested. */
     fun smsSenders(): List<String> =
@@ -142,6 +157,35 @@ class Memory(context: Context) {
             if (value.isNullOrBlank()) remove(WISE) else putString(WISE, value.trim())
         }.apply()
 
+    // -- the voice ---------------------------------------------------------
+    /**
+     * How it should sound, kept across restarts.
+     *
+     * [Voice] holds these as plain fields with sensible defaults, which was
+     * fine while nothing could change them; the moment a screen can, they have
+     * to outlive the process or every launch throws the choice away.
+     *
+     * Pitch and rate are here rather than hidden because they *are* the effect
+     * -- see the argument in [Voice]: what makes that delivery recognisable is
+     * an RP male voice pitched slightly down and slowed a touch, and which
+     * "slightly" lands depends on the voice the phone actually has. The
+     * defaults stay the recommendation; the range is deliberately narrow so a
+     * slider cannot make it unlistenable.
+     */
+    var voiceName: String?
+        get() = facts.getString(VOICE, null)?.takeIf { it.isNotBlank() }
+        set(value) = facts.edit().apply {
+            if (value.isNullOrBlank()) remove(VOICE) else putString(VOICE, value)
+        }.apply()
+
+    var voicePitch: Float
+        get() = facts.getFloat(PITCH, Voice.DEFAULT_PITCH)
+        set(value) = facts.edit().putFloat(PITCH, value.coerceIn(VOICE_RANGE)).apply()
+
+    var voiceRate: Float
+        get() = facts.getFloat(RATE, Voice.DEFAULT_RATE)
+        set(value) = facts.edit().putFloat(RATE, value.coerceIn(VOICE_RANGE)).apply()
+
     // -- helpers -----------------------------------------------------------
     private fun digitsOf(value: String) = value.filter { it.isDigit() || it == '+' }
 
@@ -155,15 +199,28 @@ class Memory(context: Context) {
         return digits >= maxOf(7, value.length / 2)
     }
 
-    private companion object {
-        const val KEY = "anthropic-key"
-        const val FACT = "fact:"
-        const val CONTACT = "contact:"
-        const val ALIAS = "alias:"
-        const val MONEY = "money:"
-        const val MONEY_AT = "money-at:"
-        const val SMS_SENDERS = "sms-senders"
-        const val WISE = "wise-token"
+    companion object {
+        /**
+         * How far the voice sliders may go.
+         *
+         * Narrow on purpose. Android accepts 0.5–2.0 for both, and most of that
+         * range is unusable -- 2.0 pitch is a cartoon and 0.5 rate is a
+         * recording played back wrong. This is the band either side of the
+         * defaults where the register still sounds like a person.
+         */
+        val VOICE_RANGE = 0.7f..1.15f
+
+        private const val KEY = "anthropic-key"
+        private const val FACT = "fact:"
+        private const val CONTACT = "contact:"
+        private const val ALIAS = "alias:"
+        private const val MONEY = "money:"
+        private const val MONEY_AT = "money-at:"
+        private const val SMS_SENDERS = "sms-senders"
+        private const val WISE = "wise-token"
+        private const val VOICE = "voice:name"
+        private const val PITCH = "voice:pitch"
+        private const val RATE = "voice:rate"
     }
 }
 

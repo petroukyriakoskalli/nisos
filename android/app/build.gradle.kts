@@ -19,7 +19,7 @@ android {
         // updater watching for a *newer* one needs the number to actually
         // move -- and "which build is on the phone" should be answerable.
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0) + 10
-        versionName = "0.6.0"
+        versionName = "0.7.0"
     }
 
     buildTypes {

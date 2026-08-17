@@ -30,10 +30,10 @@ class Voice(context: Context, private val onReady: () -> Unit = {}) {
     private var ready = false
 
     /** How much lower than default. Small: overdo it and it sounds unwell. */
-    var pitch = 0.90f
+    var pitch = DEFAULT_PITCH
 
     /** Slightly under conversational, which is what reads as considered. */
-    var rate = 0.96f
+    var rate = DEFAULT_RATE
 
     /** Set to a voice name to pin it; null follows [ENGLISH_PREFERENCES]. */
     var preferredEnglishVoice: String? = null
@@ -97,12 +97,21 @@ class Voice(context: Context, private val onReady: () -> Unit = {}) {
         }
     }
 
-    /** Every en-GB voice on this device, for the settings screen. */
+    /**
+     * Every English voice on this device, for the settings screen.
+     *
+     * en-GB first. A phone typically carries a dozen of these across en-AU,
+     * en-IN and en-US, and sorting them by name alone buries the two that this
+     * app is actually arguing for under a list that opens with Australian.
+     */
     fun englishVoices(): List<String> = try {
         engine?.voices.orEmpty()
             .filter { it.locale.language == "en" }
+            .sortedWith(
+                compareByDescending<AndroidVoice> { it.locale.country == "GB" }
+                    .thenBy { it.name }
+            )
             .map { it.name }
-            .sorted()
     } catch (_: Exception) {
         emptyList()
     }
@@ -118,6 +127,17 @@ class Voice(context: Context, private val onReady: () -> Unit = {}) {
     }
 
     companion object {
+        /**
+         * The register, as recommended.
+         *
+         * Named constants rather than field initialisers because [Memory] now
+         * persists whatever you choose and needs a default to fall back to --
+         * and two copies of `0.90f` in two files is exactly the kind of drift
+         * that ends with the settings screen quietly disagreeing with the code.
+         */
+        const val DEFAULT_PITCH = 0.90f
+        const val DEFAULT_RATE = 0.96f
+
         /**
          * Google's en-GB male voices, closest first.
          *
