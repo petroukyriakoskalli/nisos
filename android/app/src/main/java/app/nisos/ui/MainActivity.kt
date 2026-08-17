@@ -2,7 +2,6 @@ package app.nisos.ui
 
 import android.Manifest
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -49,7 +48,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.nisos.android.Lock
+import app.nisos.android.Memory
 
 /**
  * The one screen.
@@ -64,10 +66,26 @@ import androidx.lifecycle.viewmodel.compose.viewModel
  * screen is for *operating* the assistant and a token you paste once a year is
  * not an operation. See [SettingsScreen].
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
+
+    /**
+     * Whether the door is shut.
+     *
+     * Activity state rather than something inside the ViewModel, because it has
+     * to survive being read from `onStart` -- and because a lock that a
+     * recomposition could clear would not be one.
+     */
+    private val locked = mutableStateOf(false)
+
+    private lateinit var memory: Memory
+
+    /** When the app was last put away, or 0 if it has not been. */
+    private var awaySince = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        memory = Memory(applicationContext)
+        locked.value = shouldLock()
 
         setContent {
             NisosTheme {
@@ -98,13 +116,58 @@ class MainActivity : ComponentActivity() {
                 // whatever you were half way through typing.
                 BackHandler(enabled = settings) { settings = false }
 
-                if (settings) {
-                    SettingsScreen(model, onBack = { settings = false })
-                } else {
-                    Assistant(model, onSettings = { settings = true })
+                when {
+                    locked.value -> LockScreen(onUnlocked = { locked.value = false })
+                    settings -> SettingsScreen(model, onBack = { settings = false })
+                    else -> Assistant(model, onSettings = { settings = true })
                 }
             }
         }
+    }
+
+    /**
+     * Decided on the way back in, not on the way out.
+     *
+     * Locking in `onStop` looks equivalent and is not. Several things stop this
+     * activity without you having left it in any meaningful sense -- and a lock
+     * raised behind a system dialog is one you have to clear before you can see
+     * the answer you were given. Deciding on `onStart` also means the lock
+     * screen is never briefly visible on the way out, which is where a
+     * screenshot of your balances would otherwise end up in the recents list.
+     */
+    override fun onStart() {
+        super.onStart()
+        if (awaySince != 0L && System.currentTimeMillis() - awaySince > GRACE_MS) {
+            if (shouldLock()) locked.value = true
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        awaySince = System.currentTimeMillis()
+    }
+
+    /**
+     * A phone that cannot be asked is never locked.
+     *
+     * See [Lock] -- with nothing enrolled there is no way to prove who you are,
+     * and this is a sideloaded app with no recovery path. So turning your screen
+     * lock off turns this off too, which is stated here rather than hidden.
+     */
+    private fun shouldLock(): Boolean =
+        memory.lockEnabled && Lock.strength(this) != null
+
+    private companion object {
+        /**
+         * How long away is long enough to shut the door.
+         *
+         * Ten seconds. Zero would re-lock every time a system dialog took the
+         * foreground, which is both irritating and the fastest way to get the
+         * whole feature switched off. The phone's own lock screen is what covers
+         * the first ten seconds after you put it down; this covers somebody
+         * going through an unlocked phone later.
+         */
+        const val GRACE_MS = 10_000L
     }
 }
 

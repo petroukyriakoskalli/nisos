@@ -134,9 +134,23 @@ class AssistantViewModel(context: Context) : ViewModel() {
     private val _settings = mutableStateOf(SettingsState())
     val settings: State<SettingsState> get() = _settings
 
+    /**
+     * Turn the app lock on or off.
+     *
+     * Only ever called after a successful authentication -- see the ordering
+     * argument on [Memory.lockEnabled]. Takes effect on the next return to the
+     * app rather than immediately, because locking someone out of the screen
+     * they are currently standing on is not what they asked for.
+     */
+    fun setLockEnabled(enabled: Boolean) {
+        memory.lockEnabled = enabled
+        refreshSettings()
+    }
+
     /** Re-read everything the settings screen shows. */
     fun refreshSettings() {
         _settings.value = _settings.value.copy(
+            lockEnabled = memory.lockEnabled,
             hasKey = memory.hasKey,
             wiseSet = memory.wiseToken != null,
             senders = memory.smsSenders(),

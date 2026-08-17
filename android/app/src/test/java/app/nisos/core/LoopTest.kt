@@ -192,7 +192,9 @@ class LoopTest {
         assertTrue(waiting.question, waiting.question.startsWith("Add "))
         assertTrue(waiting.question, waiting.question.contains("Tuesday 11/08 at 17:00"))
         assertTrue(waiting.question, waiting.question.endsWith("?"))
-        assertEquals("30 minutes", waiting.detail)
+        // DEFAULT_MINUTES, which is an hour. Worth pinning: the duration is the
+        // one field nothing else in the app ever shows you.
+        assertEquals("60 minutes", waiting.detail)
         assertEquals(waiting.question, result.spoken)
     }
 
@@ -201,7 +203,7 @@ class LoopTest {
             .pending.single()
 
         assertEquals("οδοντίατρο", waiting.title)
-        assertEquals("30 λεπτά", waiting.detail)
+        assertEquals("60 λεπτά", waiting.detail)
         assertTrue(waiting.question, waiting.question.startsWith("Να βάλω οδοντίατρο"))
         assertTrue(waiting.question, waiting.question.endsWith(";"))   // Greek question mark
         assertTrue(waiting.question, waiting.question.contains("11/08 στις 17:00"))
@@ -217,7 +219,7 @@ class LoopTest {
 
         assertEquals("approved", done.path)
         assertEquals("calendar.add", done.action)
-        assertEquals(listOf("event:οδοντίατρο:2026-08-11T17:00:30"), phone.calls)
+        assertEquals(listOf("event:οδοντίατρο:2026-08-11T17:00:60"), phone.calls)
         assertEquals("οδοντίατρο, 11/08 στις 17:00.", done.spoken)
         assertTrue(done.pending.isEmpty())
     }

@@ -11,6 +11,7 @@ coreKtx = "1.15.0"
 lifecycle = "2.8.7"
 activityCompose = "1.9.3"
 composeBom = "2024.12.01"
+biometric = "1.1.0"
 junit = "4.13.2"
 json = "20240303"
 
@@ -24,6 +25,13 @@ androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+# The one dependency that is not Compose or the platform, and it is still the
+# platform really: BiometricPrompt is Android's own fingerprint/PIN dialog, and
+# this wrapper is what makes one call work across API levels instead of three
+# branches over deprecated FingerprintManager and KeyguardManager. It also
+# brings androidx.fragment, which is why MainActivity is a FragmentActivity --
+# the prompt is a real dialog fragment.
+androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 # Android supplies org.json at runtime, but the unit-test JVM does not -- the
 # android.jar used for unit tests is stubbed and every method throws. Adding

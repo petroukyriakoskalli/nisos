@@ -39,12 +39,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.nisos.android.Lock
 import app.nisos.android.Memory
 import app.nisos.android.Voice
 import java.time.LocalDateTime
@@ -60,6 +62,7 @@ import java.util.Locale
  * didn't save".
  */
 data class SettingsState(
+    val lockEnabled: Boolean = false,
     val hasKey: Boolean = false,
     val wiseSet: Boolean = false,
     val senders: List<String> = emptyList(),
@@ -158,6 +161,7 @@ fun SettingsScreen(model: AssistantViewModel, onBack: () -> Unit) {
                         .fillMaxWidth()
                         .verticalScroll(rememberScrollState()),
                 ) {
+                    LockSection(model, settings)
                     BrainSection(model, settings)
                     MoneySection(model, settings)
                     VoiceSection(model, settings)
@@ -165,6 +169,81 @@ fun SettingsScreen(model: AssistantViewModel, onBack: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+// --------------------------------------------------------------------------
+// The lock
+// --------------------------------------------------------------------------
+
+/**
+ * Require a fingerprint, PIN or password to open the app.
+ *
+ * **Turning it on authenticates first.** That ordering is the entire safety
+ * argument, not a nicety: you cannot enable a lock you are unable to open, so a
+ * sideloaded app with no recovery path cannot shut you out of your own API key.
+ * Turning it *off* asks as well, for the obvious reason — otherwise anyone
+ * holding the phone once, unlocked, can remove the lock for good.
+ */
+@Composable
+private fun LockSection(model: AssistantViewModel, settings: SettingsState) {
+    val context = LocalContext.current
+    val activity = remember(context) { context.hostActivity() }
+    val strength = remember(context) { Lock.strength(context) }
+    var refused by remember { mutableStateOf<String?>(null) }
+
+    Section("Opening the app") {
+        if (strength == null || activity == null) {
+            Note(
+                "This phone has no fingerprint enrolled and no screen lock, so " +
+                    "there is nothing to ask you for. Set one up in Android " +
+                    "settings and this becomes available."
+            )
+            return@Section
+        }
+
+        Note(
+            "The app holds your key, your balances and your calendar. " +
+                "App-private storage keeps those from other apps; it does " +
+                "nothing about somebody holding your phone while it is unlocked. " +
+                "This is the part that does."
+        )
+
+        Choice(
+            label = if (settings.lockEnabled) "on" else "off",
+            detail = if (settings.lockEnabled) "asked when you open it" else "opens straight away",
+            selected = settings.lockEnabled,
+            onClick = {
+                refused = null
+                authenticate(
+                    activity = activity,
+                    strength = strength,
+                    title = if (settings.lockEnabled) "Turn the lock off" else "Turn the lock on",
+                    // Named before it happens, because the system prompt on its
+                    // own says only "nisos" and gives no clue which way it is
+                    // about to go.
+                    subtitle = if (settings.lockEnabled) {
+                        "Confirm to stop asking"
+                    } else {
+                        "Confirm you can open it this way"
+                    },
+                ) { ok, message ->
+                    if (ok) model.setLockEnabled(!settings.lockEnabled) else refused = message
+                }
+            },
+        )
+
+        refused?.let { Warning(it) }
+
+        Note(
+            "Asked again after ten seconds away — short enough to be a lock, " +
+                "long enough that a permission dialog does not trip it."
+        )
+        Warning(
+            "If you remove your phone's screen lock this stops applying, " +
+                "because there is then no way to prove who you are and an app " +
+                "you can never open again is not a security feature."
+        )
     }
 }
 

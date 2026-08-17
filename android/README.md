@@ -111,6 +111,8 @@ ui/       Compose. The reactor, and one screen.
 | `android/Ears.kt` | The microphone | `nisos/stt.py` |
 | `ui/Reactor.kt` | The ring, drawn on a Canvas | `nisos/ui/index.html` |
 | `ui/SettingsScreen.kt` | The key, the money sources, the voice | `config.toml`, in Termux |
+| `ui/LockScreen.kt` | Fingerprint or PIN on open | new — Termux could not ask |
+| `android/Lock.kt` | What this phone can be asked for | new |
 
 **The split is the point.** `core/` has no Android imports, which is what lets
 the router, the time parser and the reply tables be tested the way they were in
@@ -175,8 +177,13 @@ two chips is the proof.
   which table matched, not from what the recogniser assumed, so the toggle
   corrects itself after one Greek sentence.
 - **The key is not encrypted at rest.** It sits in app-private storage, which
-  other apps cannot read — that is the threat model this holds off. It is not
-  protection against someone with your unlocked phone.
+  other apps cannot read — that is the threat model this holds off. Against
+  someone holding your unlocked phone, the answer is the app lock in
+  **Settings → Opening the app**: a fingerprint, PIN or password on open, off
+  until you turn it on. That is a screen that is not composed rather than
+  encryption — it stops a person, not a forensic image of the device — and if you
+  remove your phone's screen lock it stops applying, because there is then nothing
+  to prove who you are with.
 
 ## What still needs doing
 

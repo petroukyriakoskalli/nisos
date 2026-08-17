@@ -30,6 +30,39 @@
 
 ### Added
 
+- **The app can require a fingerprint, PIN or password to open.** Off until you
+  turn it on, in **Settings → Opening the app**.
+
+  This closes a gap the README has always admitted to. App-private storage keeps
+  the API key, your configured balances and your calendar away from *other apps*;
+  it does nothing at all about somebody holding your phone while it is unlocked.
+
+  **Turning it on authenticates first**, and that ordering is the whole safety
+  argument rather than a nicety: you cannot enable a lock you are unable to open,
+  so there is no path to being shut out of a sideloaded app that has no recovery
+  short of clearing its data and losing the key. Turning it off asks too —
+  otherwise one moment with an unlocked phone removes the lock permanently.
+
+  It re-asks after **ten seconds** away, not immediately. Zero would re-lock
+  every time a system dialog took the foreground, which is irritating enough to
+  get the feature switched off altogether; the phone's own lock screen is what
+  covers the first ten seconds after you put it down. The decision is taken on
+  the way back **in** rather than on the way out, which also keeps the lock
+  screen from being what lands in the recents preview.
+
+  Two honest limits. **Removing your phone's screen lock removes this**, because
+  there is then nothing to prove who you are with, and an app you can never open
+  again is not a security feature — the settings screen says so in place. And the
+  gate is a screen that is not composed, not encryption: the threat it addresses
+  is a person, not a forensic image of the device.
+
+  One new dependency, `androidx.biometric` — still the platform rather than a
+  convenience library. It is Android's own fingerprint/PIN dialog, and it turns
+  what would be three branches over deprecated `FingerprintManager` and
+  `KeyguardManager` into one call that asks the device which authenticators it
+  will actually accept. `MainActivity` is a `FragmentActivity` now because the
+  prompt is a real dialog fragment.
+
 - **An appointment is shown to you before it is written.** `calendar.add` no
   longer happens when you say it. The turn reads the event back as a question —
   *"Add dentist — Tuesday 11/08 at 17:00?"* — and waits for **Add** or **No**.

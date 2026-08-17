@@ -157,6 +157,22 @@ class Memory(context: Context) {
             if (value.isNullOrBlank()) remove(WISE) else putString(WISE, value.trim())
         }.apply()
 
+    // -- the lock ----------------------------------------------------------
+    /**
+     * Whether opening the app needs a fingerprint, PIN or password.
+     *
+     * Off until you turn it on, and the settings screen makes you authenticate
+     * **before** it can be turned on. That ordering is the whole safety
+     * argument: you cannot enable a lock you are unable to open, so there is no
+     * path to being shut out of a sideloaded app with no recovery.
+     *
+     * Read together with [Lock.strength] -- a phone with nothing enrolled cannot
+     * be asked, and is treated as unlocked rather than unopenable.
+     */
+    var lockEnabled: Boolean
+        get() = facts.getBoolean(LOCK, false)
+        set(value) = facts.edit().putBoolean(LOCK, value).apply()
+
     // -- the voice ---------------------------------------------------------
     /**
      * How it should sound, kept across restarts.
@@ -218,6 +234,7 @@ class Memory(context: Context) {
         private const val MONEY_AT = "money-at:"
         private const val SMS_SENDERS = "sms-senders"
         private const val WISE = "wise-token"
+        private const val LOCK = "lock:enabled"
         private const val VOICE = "voice:name"
         private const val PITCH = "voice:pitch"
         private const val RATE = "voice:rate"
