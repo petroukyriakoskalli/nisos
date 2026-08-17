@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.nisos.android.Crash
 import app.nisos.android.Lock
 import app.nisos.android.Memory
 
@@ -84,6 +85,30 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Before anything else, on purpose.
+        //
+        // If the last run died, show what it died of and stop. Every line below
+        // is a candidate for having caused it -- the biometric service, the
+        // speech engine, the stored settings -- so a report that ran after them
+        // would die of the same fault it was trying to explain, and the phone
+        // would show Samsung's useless "this app has a bug" dialog forever.
+        val crash = Crash.read(this)
+        if (crash != null) {
+            setContent {
+                NisosTheme {
+                    CrashScreen(
+                        trace = crash,
+                        onDismiss = {
+                            Crash.clear(this)
+                            recreate()
+                        },
+                    )
+                }
+            }
+            return
+        }
+
         memory = Memory(applicationContext)
         locked.value = shouldLock()
 

@@ -5,7 +5,17 @@
       only job here is to stop a white flash between launch and first frame —
       which on a black assistant is the most jarring thing the app could do.
     -->
-    <style name="Theme.Nisos" parent="android:Theme.Material.NoActionBar">
+    <!--
+      An AppCompat parent, not the platform one this used to have.
+
+      androidx.biometric shows a real dialog fragment built from AppCompat
+      layouts, and those resolve attributes such as colorAccent that a platform
+      theme does not define. Under android:Theme.Material the fingerprint prompt
+      would fail to inflate the moment it was opened. Nothing visible changes:
+      every window attribute below is set explicitly, so the window stays as dark
+      and as chrome-free as it was.
+    -->
+    <style name="Theme.Nisos" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">@color/nisos_background</item>
         <item name="android:statusBarColor">@color/nisos_background</item>
         <item name="android:navigationBarColor">@color/nisos_background</item>
