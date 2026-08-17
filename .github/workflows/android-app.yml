@@ -49,6 +49,36 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
+      # A signing key that does not change between builds.
+      #
+      # Runners are ephemeral and carry no ~/.android/debug.keystore, so the
+      # Android Gradle Plugin generated a fresh one every run: same alias and
+      # password, new key pair. Android then refuses each build as an update to
+      # the last, which is exactly what the phone did. Verified rather than
+      # assumed -- the APKs from run 10 and run 12 carry different signing keys.
+      #
+      # Held as a secret rather than committed to the repository, because a
+      # public signing key lets anyone build an APK that Android will accept as
+      # an update to this one, silently.
+      #
+      # If the secret is absent -- a fork, or before it has been set -- this step
+      # is skipped and the build falls back to the plugin's generated debug key.
+      # It still produces a working APK; it just cannot update an install that
+      # was signed by the real key.
+      - name: Restore the signing key
+        if: ${{ secrets.NISOS_KEYSTORE_B64 != '' }}
+        env:
+          KEYSTORE_B64: ${{ secrets.NISOS_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$KEYSTORE_B64" | base64 -d > nisos.jks
+          echo "  restored $(stat -c%s nisos.jks) bytes"
+          # Print the fingerprint, so "is every build signed the same?" is a
+          # question the log answers rather than one you have to unzip an APK
+          # to settle.
+          keytool -list -v -keystore nisos.jks -storepass android \
+            | grep -i 'SHA256:' | head -1 | sed 's/^/  /'
+
       # The tests that matter, and the ones that can fail fast.
       - name: Unit tests
         run: gradle --no-daemon testDebugUnitTest
@@ -84,7 +114,14 @@ jobs:
       # none of those problems -- it is a direct, permanent, anonymous link to
       # the newest build, which is the difference between six steps on the
       # phone and one tap.
+      #
+      # Pushes only. A `pull_request` build republishes this asset too, which
+      # means opening a PR from an old branch silently rolls the "latest" link
+      # backwards -- and the whole argument for the link is that it always serves
+      # the newest build. It has already happened: run 13 published from a PR,
+      # then run 15 published v0.6.0 from main over the top of it.
       - name: Publish as the rolling latest build
+        if: ${{ github.event_name == 'push' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

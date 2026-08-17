@@ -40,8 +40,21 @@ One permanent link, on the phone:
 **<https://github.com/petroukyriakoskalli/nisos/releases/latest/download/nisos.apk>**
 
 Every green build replaces what that URL serves, so installing and updating are
-the same two taps. It goes on over the top — same debug signing key, so
-permissions and the stored API key survive and nothing needs uninstalling.
+the same two taps. It goes on over the top: permissions and the stored API key
+survive and nothing needs uninstalling.
+
+⚠️ **That was untrue until v0.7.0.** The claim was there from the start, and it
+was wrong. CI runners are ephemeral and carry no `~/.android/debug.keystore`, so
+the Android Gradle Plugin generated a fresh one on every run — same alias and
+password, **new key pair** — and Android refuses an APK as an update when the
+signature differs. It went unnoticed because the first phone install had nothing
+to replace. Builds now restore one keystore from the `NISOS_KEYSTORE_B64`
+repository secret, so the signature is stable.
+
+**Coming from a build before v0.7.0, you have to uninstall once.** The old
+install is signed by a key that no longer exists anywhere, and nothing can update
+it. That one uninstall wipes app-private storage, so the API key and settings go
+with it; every update after it is two taps as advertised.
 
 There is no way to skip the install itself; Android requires one for any code
 change. What the rolling release removes is the five steps around it — the zip,
@@ -62,9 +75,18 @@ gradle assembleDebug
 gradle installDebug     # onto a connected phone
 ```
 
-The APK is debug-signed. It is sideloaded rather than shipped through a store,
-so a release key would be ceremony — and a signing secret in a public
-repository is a real cost with no benefit.
+The APK is debug-signed. It is sideloaded rather than shipped through a store, so
+a release key would be ceremony.
+
+The key is **not committed** though, which is the part that took a phone to work
+out. It lives in the `NISOS_KEYSTORE_B64` secret and is written to
+`android/nisos.jks` at build time. A signing key in a public repository is not
+merely untidy: it lets anyone build an APK that Android accepts as a silent update
+to yours, which matters now the app holds an API key and can send messages.
+
+When the secret is absent — a fork, or a clean clone — the build falls back to the
+plugin's generated debug key and still produces a working APK. It just cannot
+update an install signed by the real one.
 
 ## What has actually been proven on a phone
 

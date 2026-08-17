@@ -31,8 +31,16 @@ venv/
 .DS_Store
 Thumbs.db
 
+# The signing key, restored from the NISOS_KEYSTORE_B64 repository secret at
+# build time -- see .github/workflows/android-app.yml. Ignored rather than merely
+# absent: committing it would let anyone build an APK that Android accepts as a
+# silent update to a real install.
+android/nisos.jks
+*.jks
+*.keystore
+
 # Android build output. `.gradle/` is a cache and `build/` is generated; the
-# APK you want is a CI artifact, not something committed.
+# APK you want is a release asset, not something committed.
 android/.gradle/
 android/build/
 android/app/build/

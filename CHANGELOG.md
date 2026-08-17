@@ -4,6 +4,43 @@
 
 ### Fixed
 
+- **Every build was signed by a different key, so no update would install.**
+  Found by trying to update a real phone, which simply refused.
+
+  CI runners are ephemeral and carry no `~/.android/debug.keystore`, so the
+  Android Gradle Plugin generated a fresh one on every run — same alias, same
+  password, **new key pair** — and Android rejects an APK as an update when the
+  signature does not match. Confirmed rather than assumed: the APKs from run 10
+  and run 12 were pulled apart and their signing keys differ. They are v2-scheme
+  signed, so the certificate is in the APK Signing Block rather than a
+  `META-INF/*.RSA` you can unzip, which is why it needed looking for.
+
+  🔴 This makes a claim that has been in `android/README.md` since the app
+  existed **false**: *"It goes on over the top — same debug signing key, so
+  permissions and the stored API key survive."* It was never true. It went
+  unnoticed because the first phone install had nothing to replace.
+
+  Builds now restore one keystore from the `NISOS_KEYSTORE_B64` repository
+  secret. Held as a secret rather than committed, because a public signing key
+  lets anyone build an APK that Android accepts as a *silent* update to yours —
+  a different proposition now the app holds an API key and can send messages.
+  When the secret is absent the build falls back to the generated debug key and
+  still succeeds, so a fork is not broken by this. The workflow prints the
+  certificate fingerprint, so "is every build signed the same?" is a question
+  the log answers.
+
+  ⚠️ **One uninstall is needed to cross this fix.** Any install from before it is
+  signed by a key that no longer exists anywhere, and nothing can update it. That
+  uninstall takes the stored API key with it. Every update after it is two taps.
+
+- **A pull request could roll the "latest" APK link backwards.** The publish step
+  ran on `pull_request` as well as `push`, so opening a PR from an old branch
+  republished that branch's build to the one permanent URL the phone uses. It has
+  already happened here: run 13 published from a PR, then run 15 published v0.6.0
+  from `main` over the top. Now guarded to `push` only, which is the whole point
+  of the link — it should always serve the newest build, not the most recent
+  branch anybody proposed.
+
 - **The controls were drawn on top of the ring.** Found on a Samsung S25 Ultra,
   and the second layout bug that only a phone could show.
 
