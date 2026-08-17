@@ -17,6 +17,35 @@ APK=${1:-nisos.apk}
 PKG=app.nisos
 ACTIVITY=$PKG/$PKG.ui.MainActivity
 
+launch() {
+    adb shell am force-stop $PKG || true
+    adb logcat -c
+    adb shell am start -W -n "$ACTIVITY"
+    # Compose needs a moment to inflate, and a crash on the first frame is
+    # exactly what this is looking for -- so look after it has had one.
+    sleep 10
+}
+
+alive() {
+    # Tested on pidof's *output*, not its exit status: the status is not reliably
+    # propagated back through `adb shell`, which made run 20 report a healthy app
+    # as dead.
+    local pid
+    pid=$(adb shell pidof "$PKG" | tr -d '\r' | awk '{print $1}')
+    if [ -z "$pid" ]; then
+        echo "::error::$PKG is not running -- $1"
+        adb logcat -d -v brief | grep -iE "nisos|FATAL|AndroidRuntime" | tail -60
+        return 1
+    fi
+    echo "  pid $pid"
+    if adb logcat -d | grep -E "FATAL EXCEPTION|E AndroidRuntime" > /tmp/fatal.txt; then
+        echo "::error::a fatal exception was logged -- $1"
+        cat /tmp/fatal.txt
+        return 1
+    fi
+    echo "  no fatal exceptions"
+}
+
 echo "::group::Install"
 adb wait-for-device
 # -r so a rerun replaces rather than colliding. A failure here is the real prize:
@@ -26,11 +55,27 @@ adb install -r "$APK"
 adb shell dumpsys package $PKG | grep -m1 versionName | sed 's/^/  /' || true
 echo "::endgroup::"
 
+# ---------------------------------------------------------------------------
+# First run, with nothing granted. This is the check that matters.
+#
+# The previous version granted all six permissions *before* launching, to keep
+# the permission dialog out of the screenshot. That is precisely what hid a
+# guaranteed crash: `RequestMultiplePermissions` has a synchronous short-circuit
+# when every permission is already held, so `launch()` returned immediately and
+# never called `requestPermissions` -- the one line that was broken. The test
+# passed while the app crashed on every real first run.
+#
+# So the first launch is now a genuine first run: fresh install, nothing granted,
+# permission dialog and all. Tidiness comes second.
+# ---------------------------------------------------------------------------
+echo "::group::First run, no permissions granted"
+launch
+adb exec-out screencap -p > screen-first-run.png
+echo "  first run: $(stat -c%s screen-first-run.png) bytes"
+alive "crashed on a first run with no permissions granted"
+echo "::endgroup::"
+
 echo "::group::Grant the runtime permissions"
-# Granted up front for two reasons. The app asks for all five in a LaunchedEffect
-# on first frame, so without this the permission dialog is what the screenshot
-# photographs instead of the app. And a dialog on top makes "is our activity
-# resumed?" answer no for a reason that has nothing to do with the app.
 for p in RECORD_AUDIO READ_CALENDAR WRITE_CALENDAR READ_CONTACTS SEND_SMS READ_SMS; do
     adb shell pm grant $PKG android.permission.$p 2>/dev/null \
         && echo "  granted $p" \
@@ -38,29 +83,18 @@ for p in RECORD_AUDIO READ_CALENDAR WRITE_CALENDAR READ_CONTACTS SEND_SMS READ_S
 done
 echo "::endgroup::"
 
-echo "::group::Launch"
-adb logcat -c
-adb shell am force-stop $PKG || true
-adb shell am start -W -n "$ACTIVITY"
-# Compose needs a moment to inflate, and a crash on the first frame is precisely
-# what this is looking for -- so look after it has had one.
-sleep 10
-echo "::endgroup::"
-
-# Photographs FIRST, before anything can fail.
-#
-# The previous version put this after the liveness check, so the one run where
-# the check went wrong produced no picture at all -- the diagnostic was gated
-# behind the assertion it was supposed to explain. Never again.
-echo "::group::Screenshots"
+echo "::group::Relaunch, and photograph it"
+launch
 adb exec-out screencap -p > screen-main.png
 echo "  main screen: $(stat -c%s screen-main.png) bytes"
+alive "crashed after the permissions were granted"
+echo "::endgroup::"
 
 # Settings is reached by tapping the header. Found by asking the UI where it is
-# rather than by guessing a percentage of the screen -- the first attempt tapped
-# 82%/6% at a gear sitting nearer 92%/10%, missed, and produced two byte-identical
-# screenshots. A silent miss is the worst outcome for a check whose entire job is
-# to show you what a screen looks like.
+# rather than guessing a percentage of the screen -- the first attempt tapped
+# 82%/6% at a gear sitting nearer 92%/10%, missed, and produced two
+# byte-identical screenshots. A silent miss is the worst outcome for a check
+# whose entire job is to show what a screen looks like.
 tap_text() {
     adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1 || true
     adb pull /sdcard/ui.xml /tmp/ui.xml > /dev/null 2>&1 || true
@@ -92,15 +126,13 @@ PY
     adb shell input tap $spot
 }
 
-# Log what is actually on screen, as text. Cheap, and it makes "did the screen
-# I expected render?" answerable without eyeballing a PNG.
+echo "::group::Settings"
 adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1 || true
 adb pull /sdcard/ui.xml /tmp/ui.xml > /dev/null 2>&1 || true
 echo "  on screen: $(python3 -c "
 import re
 xml = open('/tmp/ui.xml', encoding='utf-8').read()
-seen = [t for t in re.findall(r'text=\"([^\"]+)\"', xml)]
-print(' | '.join(dict.fromkeys(seen)))
+print(' | '.join(dict.fromkeys(re.findall(r'text=\"([^\"]+)\"', xml))))
 " 2>/dev/null || echo '(no dump)')"
 
 if tap_text "router only"; then
@@ -111,40 +143,8 @@ if tap_text "router only"; then
         echo "::error::the settings screenshot is identical to the main one -- the tap did nothing"
         exit 1
     fi
+    alive "crashed on the settings screen"
 fi
-echo "::endgroup::"
-
-echo "::group::Is it alive?"
-# Tested on pidof's *output*, not its exit status. The exit status is not
-# reliably propagated back through `adb shell`, which is what failed run 20:
-# it reported the app as dead while the launch had returned `Status: ok` and
-# logcat held no exception at all.
-PID=$(adb shell pidof "$PKG" | tr -d '\r' | awk '{print $1}')
-if [ -z "$PID" ]; then
-    echo "::error::$PKG is not running -- it crashed or never started"
-    adb logcat -d -v brief | grep -iE "nisos|FATAL|AndroidRuntime" | tail -60
-    exit 1
-fi
-echo "  pid $PID"
-
-# And is our screen actually the one in front? A process that is alive but whose
-# activity died would otherwise pass.
-RESUMED=$(adb shell dumpsys activity activities | tr -d '\r' \
-    | grep -m1 -E "topResumedActivity|mResumedActivity" || true)
-echo "  $RESUMED"
-case "$RESUMED" in
-    *"$PKG"*) echo "  our activity is in front" ;;
-    *) echo "::warning::$PKG is running but not the resumed activity" ;;
-esac
-echo "::endgroup::"
-
-echo "::group::Fatal exceptions"
-if adb logcat -d | grep -E "FATAL EXCEPTION|E AndroidRuntime" > /tmp/fatal.txt; then
-    echo "::error::a fatal exception was logged"
-    cat /tmp/fatal.txt
-    exit 1
-fi
-echo "  none"
 echo "::endgroup::"
 
 echo "smoke test passed"

@@ -12,6 +12,7 @@ lifecycle = "2.8.7"
 activityCompose = "1.9.3"
 composeBom = "2024.12.01"
 biometric = "1.1.0"
+fragment = "1.8.5"
 junit = "4.13.2"
 json = "20240303"
 
@@ -32,6 +33,20 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 # brings androidx.fragment, which is why MainActivity is a FragmentActivity --
 # the prompt is a real dialog fragment.
 androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
+# Declared only to raise the version biometric drags in, which is 1.2.5 -- from
+# 2020, and actively broken with the Activity Result API.
+#
+# fragment 1.2.5's FragmentActivity.checkForValidRequestCode rejects any request
+# code above 0xFFFF, while ActivityResultRegistry deliberately generates codes
+# starting at 0x10000 so they cannot collide with legacy onActivityResult codes.
+# Every launcher call is therefore a guaranteed crash:
+#
+#   java.lang.IllegalArgumentException: Can only use lower 16 bits for requestCode
+#
+# It only became reachable when MainActivity changed from ComponentActivity to
+# FragmentActivity for the biometric prompt -- ComponentActivity has no such
+# check. Found on a Samsung SM-S938B, Android 16.
+androidx-fragment = { group = "androidx.fragment", name = "fragment", version.ref = "fragment" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 # Android supplies org.json at runtime, but the unit-test JVM does not -- the
 # android.jar used for unit tests is stubbed and every method throws. Adding

@@ -4,6 +4,31 @@
 
 ### Fixed
 
+- **It crashed on launch on a real phone: `Can only use lower 16 bits for
+  requestCode`.** Found on a Samsung SM-S938B, Android 16, and caused entirely by
+  the app lock added in this same version.
+
+  `androidx.biometric:1.1.0` drags in `androidx.fragment:1.2.5` — from 2020. That
+  version's `FragmentActivity.checkForValidRequestCode` rejects any request code
+  above `0xFFFF`, while `ActivityResultRegistry` deliberately generates codes
+  starting at `0x10000` so they cannot collide with legacy `onActivityResult`
+  codes. Every launcher call is therefore a **guaranteed** crash — and this app
+  asks for five permissions from a `LaunchedEffect` on the first frame.
+
+  It only became reachable because `MainActivity` changed from `ComponentActivity`
+  to `FragmentActivity` to host the biometric prompt. `ComponentActivity` has no
+  such check, so the same code was fine the day before. Fixed by declaring
+  `androidx.fragment:1.8.5` explicitly, purely to raise what biometric supplies.
+
+  🔴 **The emulator test had just been added and did not catch it — because of
+  something added to make the screenshots tidier.** The script granted all six
+  permissions *before* the first launch, to keep the permission dialog out of the
+  picture. `RequestMultiplePermissions` has a synchronous short-circuit when every
+  permission is already held, so `launch()` returned immediately and never called
+  the one line that was broken. A green test, and a crash on every real first run.
+  The first launch is now a genuine first run — fresh install, nothing granted,
+  dialog and all — and tidiness comes second.
+
 - **Every build was signed by a different key, so no update would install.**
   Found by trying to update a real phone, which simply refused.
 
