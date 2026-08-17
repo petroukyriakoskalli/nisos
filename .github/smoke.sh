@@ -56,17 +56,62 @@ echo "::group::Screenshots"
 adb exec-out screencap -p > screen-main.png
 echo "  main screen: $(stat -c%s screen-main.png) bytes"
 
-# Settings is reached by tapping the header, top right. Derived from the real
-# display size rather than hardcoded, so a different emulator profile does not
-# silently start tapping somewhere else.
-SIZE=$(adb shell wm size | tr -d '\r' | awk '{print $3}')
-W=${SIZE%x*}
-H=${SIZE#*x}
-echo "  display ${W}x${H}"
-adb shell input tap $((W * 82 / 100)) $((H * 6 / 100))
-sleep 3
-adb exec-out screencap -p > screen-settings.png
-echo "  after tapping the header: $(stat -c%s screen-settings.png) bytes"
+# Settings is reached by tapping the header. Found by asking the UI where it is
+# rather than by guessing a percentage of the screen -- the first attempt tapped
+# 82%/6% at a gear sitting nearer 92%/10%, missed, and produced two byte-identical
+# screenshots. A silent miss is the worst outcome for a check whose entire job is
+# to show you what a screen looks like.
+tap_text() {
+    adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1 || true
+    adb pull /sdcard/ui.xml /tmp/ui.xml > /dev/null 2>&1 || true
+    local spot
+    spot=$(python3 - "$1" <<'PY'
+import re, sys
+want = sys.argv[1]
+try:
+    xml = open("/tmp/ui.xml", encoding="utf-8").read()
+except OSError:
+    sys.exit(0)
+for node in re.findall(r"<node[^>]*>", xml):
+    text = re.search(r'text="([^"]*)"', node)
+    desc = re.search(r'content-desc="([^"]*)"', node)
+    haystack = (text.group(1) if text else "") + (desc.group(1) if desc else "")
+    if want.lower() in haystack.lower():
+        b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node)
+        if b:
+            x1, y1, x2, y2 = map(int, b.groups())
+            print((x1 + x2) // 2, (y1 + y2) // 2)
+            break
+PY
+    )
+    if [ -z "$spot" ]; then
+        echo "::warning::could not find '$1' on screen -- not tapping"
+        return 1
+    fi
+    echo "  tapping '$1' at $spot"
+    adb shell input tap $spot
+}
+
+# Log what is actually on screen, as text. Cheap, and it makes "did the screen
+# I expected render?" answerable without eyeballing a PNG.
+adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1 || true
+adb pull /sdcard/ui.xml /tmp/ui.xml > /dev/null 2>&1 || true
+echo "  on screen: $(python3 -c "
+import re
+xml = open('/tmp/ui.xml', encoding='utf-8').read()
+seen = [t for t in re.findall(r'text=\"([^\"]+)\"', xml)]
+print(' | '.join(dict.fromkeys(seen)))
+" 2>/dev/null || echo '(no dump)')"
+
+if tap_text "router only"; then
+    sleep 3
+    adb exec-out screencap -p > screen-settings.png
+    echo "  settings: $(stat -c%s screen-settings.png) bytes"
+    if cmp -s screen-main.png screen-settings.png; then
+        echo "::error::the settings screenshot is identical to the main one -- the tap did nothing"
+        exit 1
+    fi
+fi
 echo "::endgroup::"
 
 echo "::group::Is it alive?"
