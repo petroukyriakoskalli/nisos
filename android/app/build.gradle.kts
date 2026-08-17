@@ -131,6 +131,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.biometric)
+    // Must come with biometric: it ships fragment 1.2.5, which crashes on every
+    // Activity Result launcher call. See the note in libs.versions.toml.
+    implementation(libs.androidx.fragment)
 
     testImplementation(libs.junit)
     testImplementation(libs.json)

@@ -43,7 +43,13 @@
         </intent>
     </queries>
 
+    <!--
+      android:name installs the crash handler before any activity exists, which
+      is the case that needs catching: a crash while the activity is still being
+      built is one the activity cannot report on. See android/Crash.kt.
+    -->
     <application
+        android:name=".android.NisosApp"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

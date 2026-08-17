@@ -14,15 +14,20 @@
 
 name: Android app
 
+# The smoke script is listed as well as the workflow. It is *part* of the
+# workflow -- leaving it out meant editing the smoke test could not trigger the
+# smoke test, so a fix to it sat unrun and looked as though CI had stalled.
 on:
   push:
     branches: ["**"]
     paths:
       - "android/**"
       - ".github/workflows/android-app.yml"
+      - ".github/smoke.sh"
   pull_request:
     paths:
       - "android/**"
+      - ".github/smoke.sh"
   workflow_dispatch:
 
 permissions:
@@ -168,3 +173,65 @@ jobs:
           name: test-report
           path: android/app/build/reports/tests/
           if-no-files-found: ignore
+
+  # Does it actually install, and does it actually start?
+  #
+  # Neither question was being asked. The build job proves the Kotlin compiles
+  # and that `core/` behaves, and then published an APK that nothing had ever
+  # installed or launched -- which is how two layout bugs and a signing bug all
+  # reached a phone before anyone found them. "It builds" and "it runs" are
+  # different claims.
+  #
+  # ⚠️ What this cannot test is the *phone's* policy. Samsung's Auto Blocker, the
+  # per-source "install unknown apps" permission and Play Protect all refuse
+  # perfectly valid APKs, and an emulator has none of them. Green here means the
+  # APK is installable and starts; it does not mean a given handset will allow it.
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: nisos-apk
+
+      - name: Name it predictably
+        run: |
+          set -euo pipefail
+          mv "$(find . -maxdepth 2 -name '*.apk' | head -1)" nisos.apk
+          ls -lh nisos.apk
+
+      # The emulator needs hardware acceleration to be usable, and the runner
+      # has KVM but does not hand it to the job's user by default.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # API 35 on purpose, not the oldest thing that boots. Android 15 is where
+      # the edge-to-edge change lives, and edge-to-edge is what produced both
+      # layout bugs -- testing on an older image would miss the whole class.
+      - name: Install and launch it
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: bash .github/smoke.sh nisos.apk
+
+      # The point of the screenshots is that they are looked at. Both bugs found
+      # on hardware were invisible in the source and would not have failed any
+      # assertion anyone would think to write.
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screen-*.png
+          if-no-files-found: warn

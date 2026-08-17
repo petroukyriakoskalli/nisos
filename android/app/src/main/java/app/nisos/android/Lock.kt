@@ -55,9 +55,13 @@ object Lock {
         LADDER.firstOrNull {
             manager.canAuthenticate(it) == BiometricManager.BIOMETRIC_SUCCESS
         }
-    } catch (_: Exception) {
-        // A device that throws while being asked whether it can authenticate is
-        // a device that cannot. Failing to null keeps the app openable.
+    } catch (_: Throwable) {
+        // Throwable, not Exception. This runs during `onCreate` on whatever
+        // biometric stack the vendor shipped, and the failures that matter there
+        // are Errors -- a missing class, a linkage problem -- which an
+        // `Exception` catch would let through and turn into a crash on launch.
+        // A device that throws when asked whether it can authenticate is a device
+        // that cannot; failing to null keeps the app openable.
         null
     }
 
