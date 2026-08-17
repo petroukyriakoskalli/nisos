@@ -185,6 +185,30 @@ class SmsBalanceSource(
 
     companion object {
         /**
+         * Put a bank on the list, or refuse to.
+         *
+         * Lives here rather than in the settings screen for the reason
+         * everything else in `core/` does -- it is a rule, and a rule that
+         * cannot be tested is a rule you find out about later.
+         *
+         * The rule: no duplicate, compared without case. Android's SMS query is
+         * `ADDRESS LIKE '%name%'`, which is itself case-blind, so "BOC" and
+         * "boc" would be two sources reading the very same message -- and the
+         * bank would be silently counted **twice** in the total. Two sources
+         * answering makes it read as better-attributed, not worse, which is the
+         * kind of wrong that never gets questioned.
+         *
+         * @return the new list, or null when the name was empty or already
+         *   there, so the caller can say which rather than failing quietly.
+         */
+        fun addSender(existing: List<String>, raw: String): List<String>? {
+            val name = raw.trim()
+            if (name.isEmpty()) return null
+            if (existing.any { it.equals(name, ignoreCase = true) }) return null
+            return existing + name
+        }
+
+        /**
          * Words a bank puts next to the number that is your balance.
          *
          * Greek and English both, because a Cyprus bank will use either

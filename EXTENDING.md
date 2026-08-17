@@ -115,6 +115,32 @@ That asymmetry is worth knowing if you ever want an action the model *cannot*
 choose: there is no list to leave it out of. The clean way is to keep it out of
 `REGISTRY` entirely and reach it from the router alone.
 
+### 5. If it should ask before it acts
+
+Add it to `PREVIEW` in `core/Actions.kt` with a lambda returning the fields to
+describe it by, then add `<action>.confirm` and `<action>.detail` to `SAY` in both
+languages. `handle` will hold the step back, speak the question and put a card on
+screen; `approve` runs the stored `Step` verbatim when the user taps.
+
+```kotlin
+val PREVIEW = mapOf(
+    "calendar.add" to { args, language -> /* fields */ },
+)
+```
+
+Membership of that map is what makes an action need approval, and the same map
+supplies the words — so there is no way to end up asking "are you sure?" about
+nothing in particular. `missingConfirmations()` fails a test if either phrase is
+absent.
+
+**Parse once.** Whatever the preview computes, the action must compute the same
+way — `calendar.add` and its preview both call `proposeEvent`. A confirmation
+built from a second parser is theatre: it agrees with you until the day it
+matters, by which point you have stopped reading it.
+
+Reserve this for actions that write something durable somewhere you will not
+look. Reversible ones do not earn the friction.
+
 ### Then
 
 ```bash

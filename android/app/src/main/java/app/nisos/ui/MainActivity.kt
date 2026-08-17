@@ -2,13 +2,16 @@ package app.nisos.ui
 
 import android.Manifest
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,8 +23,9 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -40,12 +44,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.nisos.android.Lock
+import app.nisos.android.Memory
 
 /**
  * The one screen.
@@ -55,11 +61,31 @@ import androidx.lifecycle.viewmodel.compose.viewModel
  * makes the useful thing -- what it just did -- the smallest element on
  * screen. What matters is: is it hearing me, what did it understand, what did
  * it do. In that order, largest first.
+ *
+ * Settings are a second screen rather than more rows on this one, because this
+ * screen is for *operating* the assistant and a token you paste once a year is
+ * not an operation. See [SettingsScreen].
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
+
+    /**
+     * Whether the door is shut.
+     *
+     * Activity state rather than something inside the ViewModel, because it has
+     * to survive being read from `onStart` -- and because a lock that a
+     * recomposition could clear would not be one.
+     */
+    private val locked = mutableStateOf(false)
+
+    private lateinit var memory: Memory
+
+    /** When the app was last put away, or 0 if it has not been. */
+    private var awaySince = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        memory = Memory(applicationContext)
+        locked.value = shouldLock()
 
         setContent {
             NisosTheme {
@@ -83,14 +109,70 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                Assistant(model)
+                var settings by remember { mutableStateOf(false) }
+
+                // Without this, the phone's back gesture closes the app from
+                // the settings screen instead of the screen -- which loses
+                // whatever you were half way through typing.
+                BackHandler(enabled = settings) { settings = false }
+
+                when {
+                    locked.value -> LockScreen(onUnlocked = { locked.value = false })
+                    settings -> SettingsScreen(model, onBack = { settings = false })
+                    else -> Assistant(model, onSettings = { settings = true })
+                }
             }
         }
+    }
+
+    /**
+     * Decided on the way back in, not on the way out.
+     *
+     * Locking in `onStop` looks equivalent and is not. Several things stop this
+     * activity without you having left it in any meaningful sense -- and a lock
+     * raised behind a system dialog is one you have to clear before you can see
+     * the answer you were given. Deciding on `onStart` also means the lock
+     * screen is never briefly visible on the way out, which is where a
+     * screenshot of your balances would otherwise end up in the recents list.
+     */
+    override fun onStart() {
+        super.onStart()
+        if (awaySince != 0L && System.currentTimeMillis() - awaySince > GRACE_MS) {
+            if (shouldLock()) locked.value = true
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        awaySince = System.currentTimeMillis()
+    }
+
+    /**
+     * A phone that cannot be asked is never locked.
+     *
+     * See [Lock] -- with nothing enrolled there is no way to prove who you are,
+     * and this is a sideloaded app with no recovery path. So turning your screen
+     * lock off turns this off too, which is stated here rather than hidden.
+     */
+    private fun shouldLock(): Boolean =
+        memory.lockEnabled && Lock.strength(this) != null
+
+    private companion object {
+        /**
+         * How long away is long enough to shut the door.
+         *
+         * Ten seconds. Zero would re-lock every time a system dialog took the
+         * foreground, which is both irritating and the fastest way to get the
+         * whole feature switched off. The phone's own lock screen is what covers
+         * the first ten seconds after you put it down; this covers somebody
+         * going through an unlocked phone later.
+         */
+        const val GRACE_MS = 10_000L
     }
 }
 
 @Composable
-private fun Assistant(model: AssistantViewModel) {
+private fun Assistant(model: AssistantViewModel, onSettings: () -> Unit) {
     val state by model.state
 
     Surface(
@@ -113,27 +195,38 @@ private fun Assistant(model: AssistantViewModel) {
                     // to or not, so the window is taller than the part you can
                     // actually see and the layout has to subtract the system
                     // bars itself. Without this the bottom row -- type,
-                    // language, key -- sits underneath the navigation bar,
+                    // language, settings -- sits underneath the navigation bar,
                     // half legible and completely untappable, which is exactly
                     // how it shipped and exactly what the first run showed.
+                    //
+                    // safeDrawing also covers the soft keyboard, which is why
+                    // the middle section below has to be able to give way.
                     .safeDrawingPadding()
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween,
+                // NOT SpaceBetween. That was the second layout bug found on a
+                // phone: SpaceBetween divides the *leftover* space between
+                // children, and when there is no leftover the share it hands
+                // out goes negative -- so the three blocks were laid on top of
+                // one another, and because a Column draws in order the
+                // controls were painted over the ring and the text. The middle
+                // block carries the weight instead; it absorbs whatever is
+                // spare and shrinks when there is none, so there is never a
+                // negative gap to distribute.
             ) {
-                Header(state)
+                Header(state, onSettings)
 
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Reactor(mood = state.mood, level = state.level)
-                    Spacer(Modifier.height(28.dp))
-                    Heard(state)
-                }
+                Middle(state)
 
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Did(state)
+                    // The card replaces the reply rather than sitting under it.
+                    // The question is already spoken and the card restates it,
+                    // so showing both would say the same thing twice in the one
+                    // place where the wording has to be read carefully.
+                    if (state.pending.isNotEmpty()) Approval(model, state) else Did(state)
                     Spacer(Modifier.height(20.dp))
                     Controls(model, state)
                 }
@@ -142,8 +235,40 @@ private fun Assistant(model: AssistantViewModel) {
     }
 }
 
+/**
+ * The ring and what it heard, in whatever room is left over.
+ *
+ * The sizing is the fix for the collision. A fixed 260dp ring cannot give way,
+ * so when the keyboard came up or a panel opened something had to -- and what
+ * gave way was the layout, silently, by overlapping. Here the ring is measured
+ * against the space that actually exists: it shrinks, and below the point where
+ * a ring would be more obstruction than ornament it stops being drawn at all.
+ * Anything still too tall scrolls, which is the one outcome that cannot hide a
+ * control behind a graphic.
+ */
 @Composable
-private fun Header(state: AssistantState) {
+private fun ColumnScope.Middle(state: AssistantState) {
+    BoxWithConstraints(
+        modifier = Modifier.weight(1f).fillMaxWidth(),
+        contentAlignment = Alignment.Center,
+    ) {
+        val diameter = minOf(260.dp, maxWidth - 16.dp, maxHeight * 0.60f)
+
+        Column(
+            modifier = Modifier.verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (diameter >= 120.dp) {
+                Reactor(mood = state.mood, level = state.level, diameter = diameter)
+                Spacer(Modifier.height(28.dp))
+            }
+            Heard(state)
+        }
+    }
+}
+
+@Composable
+private fun Header(state: AssistantState, onSettings: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -159,13 +284,26 @@ private fun Header(state: AssistantState) {
         // Says which brain, and whether there is one. "No key" is a state you
         // need to be able to see rather than discover by asking a question
         // the router happens not to know.
-        Text(
-            state.brainLabel,
-            color = Color(0xFF4A5D6E),
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace,
-            letterSpacing = 1.sp,
-        )
+        //
+        // It is also the way in to settings, which puts the door next to the
+        // thing that makes you want it -- and up here rather than in the
+        // bottom row, which is where the crowding was.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clickable(onClick = onSettings)
+                .padding(start = 12.dp, top = 6.dp, bottom = 6.dp),
+        ) {
+            Text(
+                state.brainLabel,
+                color = Color(0xFF4A5D6E),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 1.sp,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("⚙", color = Color(0xFF4A5D6E), fontSize = 15.sp)
+        }
     }
 }
 
@@ -193,6 +331,12 @@ private fun Did(state: AssistantState) {
             fontSize = 17.sp,
             textAlign = TextAlign.Center,
             lineHeight = 25.sp,
+            // Bounded because this block sits above the Speak button and has
+            // no weight, so an unusually long reply would push the button off
+            // the bottom of the screen. The reply is spoken; this is a
+            // transcript of it, and three lines is enough of one.
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
         )
         Spacer(Modifier.height(14.dp))
@@ -204,6 +348,84 @@ private fun Did(state: AssistantState) {
             contentPadding = PaddingValues(horizontal = 4.dp),
         ) {
             items(state.actions) { name -> ActionChip(name) }
+        }
+    }
+}
+
+/**
+ * What it is about to write, and a way to stop it.
+ *
+ * The only action that waits is `calendar.add`, and it waits because it is the
+ * only one that writes something durable into a place you will not look until
+ * the day it matters -- from a time phrase that had to be *interpreted*. The
+ * torch is undone by saying the opposite; a wrong appointment is found weeks
+ * later by missing it.
+ *
+ * The question names the **weekday** rather than only the date, because that is
+ * the part that catches «αύριο στις πέντε» landing on the wrong day. Both the
+ * question and the write come from one parser, so this cannot show you one event
+ * and file another.
+ */
+@Composable
+private fun Approval(model: AssistantViewModel, state: AssistantState) {
+    Surface(
+        color = Color(0xFF35E0F0).copy(alpha = 0.07f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            state.pending.forEach { waiting ->
+                Text(
+                    waiting.question,
+                    color = Color(0xFF9BE9F2),
+                    fontSize = 16.sp,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 23.sp,
+                )
+                if (waiting.detail.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        waiting.detail,
+                        color = Color(0xFF4A5D6E),
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // Declining is the wider, plainer button and comes first. The
+                // whole point of the step is that it is easy not to write.
+                Button(
+                    onClick = { model.cancel() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF16202A),
+                        contentColor = Color(0xFF8A9AAA),
+                    ),
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.weight(1f).height(46.dp),
+                ) { Text("No", fontSize = 14.sp) }
+
+                Button(
+                    onClick = { model.confirm() },
+                    enabled = !state.busy,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF35E0F0).copy(alpha = 0.22f),
+                        contentColor = Color(0xFF9BE9F2),
+                        disabledContainerColor = Color(0xFF16202A),
+                        disabledContentColor = Color(0xFF3A4A5A),
+                    ),
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.weight(1f).height(46.dp),
+                ) { Text("Add", fontSize = 14.sp, letterSpacing = 1.sp) }
+            }
         }
     }
 }
@@ -235,8 +457,6 @@ private fun ActionChip(name: String) {
 private fun Controls(model: AssistantViewModel, state: AssistantState) {
     var typed by remember { mutableStateOf("") }
     var typing by remember { mutableStateOf(false) }
-    var key by remember { mutableStateOf("") }
-    var keying by remember { mutableStateOf(false) }
 
     Button(
         onClick = { model.listen() },
@@ -282,48 +502,10 @@ private fun Controls(model: AssistantViewModel, state: AssistantState) {
                 fontSize = 12.sp,
             )
         }
-        Spacer(Modifier.width(8.dp))
-        TextButton(onClick = { keying = !keying }) {
-            Text(
-                if (model.hasKey) "key ✓" else "key",
-                color = if (model.hasKey) Color(0xFF3A4A5A) else Color(0xFF8A6A2A),
-                fontSize = 12.sp,
-            )
-        }
-    }
-
-    if (keying) {
-        // Typed in rather than pasted into a settings file, for the reason the
-        // Python read it from stdin and never from an argument: a secret that
-        // lands anywhere quotable ends up in a bug report eventually.
-        OutlinedTextField(
-            value = key,
-            onValueChange = { key = it },
-            placeholder = { Text("sk-ant-…", color = Color(0xFF2A3A4A)) },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color(0xFFDCE8F0),
-                unfocusedTextColor = Color(0xFFDCE8F0),
-                focusedBorderColor = Color(0xFF35E0F0).copy(alpha = 0.4f),
-                unfocusedBorderColor = Color(0xFF1E2A36),
-                cursorColor = Color(0xFF35E0F0),
-            ),
-        )
-        Button(
-            onClick = {
-                model.saveKey(key)
-                key = ""
-                keying = false
-            },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF16202A),
-                contentColor = Color(0xFF9BE9F2),
-            ),
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-        ) { Text(if (key.isBlank()) "Clear key" else "Save key") }
+        // The key used to be a third button here. It moved into settings: it is
+        // configuration rather than an operation, the header already announces
+        // when it is missing, and this row was one of the things crowding the
+        // bottom of the screen.
     }
 
     if (typing) {

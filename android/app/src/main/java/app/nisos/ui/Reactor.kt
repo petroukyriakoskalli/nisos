@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.cos
 import kotlin.math.sin
@@ -60,9 +61,13 @@ private fun Mood.tint(): Color = when (this) {
  * @param level 0..1 microphone amplitude. Drives the inner ring directly, so
  *   the thing on screen is reacting to your actual voice rather than playing a
  *   canned animation at you.
+ * @param diameter how big to draw it. Was a hard-coded 260dp, which is what
+ *   made the ring collide with the controls on a real phone: a fixed size
+ *   cannot give way, so something else had to. The caller now measures the
+ *   space it actually has and passes it in -- see the comment in `MainActivity`.
  */
 @Composable
-fun Reactor(mood: Mood, level: Float, modifier: Modifier = Modifier) {
+fun Reactor(mood: Mood, level: Float, diameter: Dp = 260.dp, modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "reactor")
 
     // One slow rotation for the outer ticks, one faster counter-rotation for
@@ -101,7 +106,7 @@ fun Reactor(mood: Mood, level: Float, modifier: Modifier = Modifier) {
     val active = mood != Mood.Idle
     val pulse = if (active) breathe else 1f
 
-    Box(modifier = modifier.size(260.dp), contentAlignment = Alignment.Center) {
+    Box(modifier = modifier.size(diameter), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val centre = Offset(size.width / 2f, size.height / 2f)
             val radius = size.minDimension / 2f

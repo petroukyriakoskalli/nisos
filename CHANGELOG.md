@@ -1,5 +1,192 @@
 # Changelog
 
+## v0.7.0 — 2026-08-10
+
+### Fixed
+
+- **Every build was signed by a different key, so no update would install.**
+  Found by trying to update a real phone, which simply refused.
+
+  CI runners are ephemeral and carry no `~/.android/debug.keystore`, so the
+  Android Gradle Plugin generated a fresh one on every run — same alias, same
+  password, **new key pair** — and Android rejects an APK as an update when the
+  signature does not match. Confirmed rather than assumed: the APKs from run 10
+  and run 12 were pulled apart and their signing keys differ. They are v2-scheme
+  signed, so the certificate is in the APK Signing Block rather than a
+  `META-INF/*.RSA` you can unzip, which is why it needed looking for.
+
+  🔴 This makes a claim that has been in `android/README.md` since the app
+  existed **false**: *"It goes on over the top — same debug signing key, so
+  permissions and the stored API key survive."* It was never true. It went
+  unnoticed because the first phone install had nothing to replace.
+
+  Builds now restore one keystore from the `NISOS_KEYSTORE_B64` repository
+  secret. Held as a secret rather than committed, because a public signing key
+  lets anyone build an APK that Android accepts as a *silent* update to yours —
+  a different proposition now the app holds an API key and can send messages.
+  When the secret is absent the build falls back to the generated debug key and
+  still succeeds, so a fork is not broken by this. The workflow prints the
+  certificate fingerprint, so "is every build signed the same?" is a question
+  the log answers.
+
+  ⚠️ **One uninstall is needed to cross this fix.** Any install from before it is
+  signed by a key that no longer exists anywhere, and nothing can update it. That
+  uninstall takes the stored API key with it. Every update after it is two taps.
+
+- **A pull request could roll the "latest" APK link backwards.** The publish step
+  ran on `pull_request` as well as `push`, so opening a PR from an old branch
+  republished that branch's build to the one permanent URL the phone uses. It has
+  already happened here: run 13 published from a PR, then run 15 published v0.6.0
+  from `main` over the top. Now guarded to `push` only, which is the whole point
+  of the link — it should always serve the newest build, not the most recent
+  branch anybody proposed.
+
+- **The controls were drawn on top of the ring.** Found on a Samsung S25 Ultra,
+  and the second layout bug that only a phone could show.
+
+  Two things caused it together. `Reactor` was a hard-coded **260 dp**, so it
+  could not give way; and the screen's outer `Column` used
+  `Arrangement.SpaceBetween`, which divides the *leftover* space between its
+  children. When there is no leftover the share it hands out goes **negative**,
+  so the three blocks were laid on top of one another — and because a `Column`
+  draws in order, the controls were painted over the ring and over the text.
+
+  It needed a trigger, which is why the arithmetic looks fine on paper: opening
+  `type` or `key` added ~118 dp each, and the soft keyboard takes ~300 dp more
+  (`safeDrawing` covers the IME as well as the system bars). Any of those turns
+  spare space negative.
+
+  The middle block now carries the weight, so it absorbs whatever is spare and
+  shrinks when there is none — there is never a negative gap to distribute. The
+  ring is measured against the room that actually exists and passed a diameter;
+  below 120 dp it is not drawn at all, on the grounds that a ring over the top
+  of the text is worse than no ring. Anything still too tall scrolls, which is
+  the one outcome that cannot hide a control behind a graphic. The spoken reply
+  is capped at three lines for the same reason: it sits above the Speak button
+  with no weight of its own, so a long one used to push the button off-screen.
+
+### Added
+
+- **The app can require a fingerprint, PIN or password to open.** Off until you
+  turn it on, in **Settings → Opening the app**.
+
+  This closes a gap the README has always admitted to. App-private storage keeps
+  the API key, your configured balances and your calendar away from *other apps*;
+  it does nothing at all about somebody holding your phone while it is unlocked.
+
+  **Turning it on authenticates first**, and that ordering is the whole safety
+  argument rather than a nicety: you cannot enable a lock you are unable to open,
+  so there is no path to being shut out of a sideloaded app that has no recovery
+  short of clearing its data and losing the key. Turning it off asks too —
+  otherwise one moment with an unlocked phone removes the lock permanently.
+
+  It re-asks after **ten seconds** away, not immediately. Zero would re-lock
+  every time a system dialog took the foreground, which is irritating enough to
+  get the feature switched off altogether; the phone's own lock screen is what
+  covers the first ten seconds after you put it down. The decision is taken on
+  the way back **in** rather than on the way out, which also keeps the lock
+  screen from being what lands in the recents preview.
+
+  Two honest limits. **Removing your phone's screen lock removes this**, because
+  there is then nothing to prove who you are with, and an app you can never open
+  again is not a security feature — the settings screen says so in place. And the
+  gate is a screen that is not composed, not encryption: the threat it addresses
+  is a person, not a forensic image of the device.
+
+  One new dependency, `androidx.biometric` — still the platform rather than a
+  convenience library. It is Android's own fingerprint/PIN dialog, and it turns
+  what would be three branches over deprecated `FingerprintManager` and
+  `KeyguardManager` into one call that asks the device which authenticators it
+  will actually accept. `MainActivity` is a `FragmentActivity` now because the
+  prompt is a real dialog fragment.
+
+- **An appointment is shown to you before it is written.** `calendar.add` no
+  longer happens when you say it. The turn reads the event back as a question —
+  *"Add dentist — Tuesday 11/08 at 17:00?"* — and waits for **Add** or **No**.
+  Nothing has touched the calendar until you tap.
+
+  It is the only action that waits, and the reasoning is specific rather than
+  general caution. The torch is undone by saying the opposite. A message is gone,
+  but you dictated its text. An appointment is a **silent edit to something you
+  will not open until the day it matters**, made from a time phrase that had to
+  be *interpreted* — and if «αύριο στις πέντε» lands on the wrong day, you find
+  out by missing it.
+
+  The question names the **weekday**, which is the whole reason it is worth
+  reading: "11/08" does not tell you which day that is, and working it out is
+  exactly the work nobody does. "Tuesday" is checked at a glance. It is named in
+  whichever language is being spoken, so a Greek reply says «Τρίτη».
+
+  **The preview and the write go through one parser.** `proposeEvent` is called
+  by both, so the card cannot show one event while the action files another. A
+  confirmation built from a second parser is theatre — it would agree with you
+  right up until it mattered, and you would have stopped checking by then. There
+  is a test whose entire job is to assert that the phone was **not** called.
+
+  Two smaller decisions. Arguments that do not parse fail *immediately* rather
+  than after the tap, because approving something that was never understood makes
+  the failure look like the approval caused it. And a turn that does two things
+  only holds back the half that needs holding: «άναψε τον φακό και βάλε ραντεβού
+  αύριο στις πέντε» lights the torch now and asks about the appointment, since
+  making the reversible half wait is friction bought for nothing.
+
+  How it generalises: membership of `PREVIEW` in `Actions.kt` is what makes an
+  action need approval, and that same map supplies the fields it is described
+  with — so an action cannot be marked as needing confirmation without also
+  providing the words to confirm it with. `missingConfirmations()` fails a test
+  if the phrasing is missing in either language, the same way `missingReplies()`
+  already did for actions.
+
+- **A settings screen.** Three of the four money sources were unreachable:
+  Wise needs a token and the bank sources need sender names, and both had
+  setters in `Memory` with no UI in front of them — so «πόσα λεφτά έχω» could
+  only ever count figures dictated by hand.
+
+  It also does the thing a settings screen is usually bad at, which is letting
+  you **check** rather than only set. **Check sources now** reads every source
+  and reports each one separately, because the spoken total says "3 of 4"
+  without saying *which* four, and a reply you have to trigger by talking is the
+  wrong place to debug a token — especially the Wise one, which has still never
+  been tried against the real API. A dead token, a revoked permission and a bank
+  that simply has not texted you lately are now three visibly different
+  outcomes instead of one silence.
+
+  `READ_SMS` is still requested only when you name your first bank sender, never
+  at launch, and the screen says plainly when senders are configured but the
+  permission is not granted — previously that combination failed silently.
+
+- **The voice is adjustable, and audible before you commit to it.** The name,
+  pitch and speed were fields on `Voice` with sensible defaults and nothing able
+  to reach them; they are now persisted in `Memory` and survive a restart, which
+  they did not before. **Say something** speaks a sample, because
+  `en-gb-x-rjs-local` tells you nothing about how a voice sounds, and tuning two
+  interacting sliders by waiting for the next real reply is no way to do it.
+  Every value has a `reset` back to the recommended one, the range is narrow
+  enough that a slider cannot make it unlistenable, and the list puts en-GB
+  first — a phone carries a dozen English voices and sorting by name buries the
+  two this is arguing for under Australian.
+
+### Changed
+
+- **The API key moved out of the bottom row and into settings.** It is
+  configuration rather than an operation, the header already announces when it
+  is missing, and that row was one of the things crowding the bottom of the
+  screen. The way in to settings is the header's own state label — the door next
+  to the thing that makes you want it.
+
+- **`SmsBalanceSource.addSender` is in `core/`, and tested.** The rule is that a
+  bank cannot be added twice in a different case: Android's SMS query is
+  `ADDRESS LIKE '%name%'` and therefore case-blind, so "boc" alongside "BOC"
+  would be two sources reading the same message and the bank counted **twice**
+  in the total. Two sources answering reads as better-attributed rather than
+  worse, so nobody would ever question the number. It went into `core/` rather
+  than the screen for the usual reason: a rule that cannot be tested is a rule
+  you find out about later.
+
+- `Memory.forgetBalance`, so a manual figure can be taken back out. A stale one
+  is worse than a missing one — it still counts, so the total keeps quoting a
+  policy you cashed in months ago.
+
 ## v0.6.0 — 2026-08-10
 
 ### Added

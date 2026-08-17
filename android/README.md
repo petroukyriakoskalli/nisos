@@ -40,8 +40,21 @@ One permanent link, on the phone:
 **<https://github.com/petroukyriakoskalli/nisos/releases/latest/download/nisos.apk>**
 
 Every green build replaces what that URL serves, so installing and updating are
-the same two taps. It goes on over the top — same debug signing key, so
-permissions and the stored API key survive and nothing needs uninstalling.
+the same two taps. It goes on over the top: permissions and the stored API key
+survive and nothing needs uninstalling.
+
+⚠️ **That was untrue until v0.7.0.** The claim was there from the start, and it
+was wrong. CI runners are ephemeral and carry no `~/.android/debug.keystore`, so
+the Android Gradle Plugin generated a fresh one on every run — same alias and
+password, **new key pair** — and Android refuses an APK as an update when the
+signature differs. It went unnoticed because the first phone install had nothing
+to replace. Builds now restore one keystore from the `NISOS_KEYSTORE_B64`
+repository secret, so the signature is stable.
+
+**Coming from a build before v0.7.0, you have to uninstall once.** The old
+install is signed by a key that no longer exists anywhere, and nothing can update
+it. That one uninstall wipes app-private storage, so the API key and settings go
+with it; every update after it is two taps as advertised.
 
 There is no way to skip the install itself; Android requires one for any code
 change. What the rolling release removes is the five steps around it — the zip,
@@ -62,9 +75,18 @@ gradle assembleDebug
 gradle installDebug     # onto a connected phone
 ```
 
-The APK is debug-signed. It is sideloaded rather than shipped through a store,
-so a release key would be ceremony — and a signing secret in a public
-repository is a real cost with no benefit.
+The APK is debug-signed. It is sideloaded rather than shipped through a store, so
+a release key would be ceremony.
+
+The key is **not committed** though, which is the part that took a phone to work
+out. It lives in the `NISOS_KEYSTORE_B64` secret and is written to
+`android/nisos.jks` at build time. A signing key in a public repository is not
+merely untidy: it lets anyone build an APK that Android accepts as a silent update
+to yours, which matters now the app holds an API key and can send messages.
+
+When the secret is absent — a fork, or a clean clone — the build falls back to the
+plugin's generated debug key and still produces a working APK. It just cannot
+update an install signed by the real one.
 
 ## What has actually been proven on a phone
 
@@ -77,10 +99,16 @@ evidence:
 | ✅ The reactor ring draws correctly | arc, glow, inner rings, 72 ticks |
 | ✅ `router only · no key` reports the real state | header |
 | ❌ The controls were behind the navigation bar | fixed in build 5 — Android 15 draws edge to edge and the layout was not subtracting the system bars |
+| ❌ The controls were drawn **on top of** the ring | fixed in v0.7.0, on a Samsung S25 Ultra — a fixed-size ring plus `Arrangement.SpaceBetween`, whose gap goes negative when nothing is spare |
 | ⬜ Everything else | the eleven commissioning tests, not yet run |
 
 No spoken turn has happened yet. The microphone, the recogniser, the voice, the
 calendar and every action are unverified on hardware.
+
+Both bugs found so far were **layout**, and neither was visible in the source.
+That is worth saying plainly: the parts of this that a laptop can check — the
+router, the parser, the reply tables — are the parts that were already tested.
+What a phone tests is everything else.
 
 ## Layout
 
@@ -104,6 +132,9 @@ ui/       Compose. The reactor, and one screen.
 | `android/Voice.kt` | Text to speech, and the voice choice | `nisos/speech.py` |
 | `android/Ears.kt` | The microphone | `nisos/stt.py` |
 | `ui/Reactor.kt` | The ring, drawn on a Canvas | `nisos/ui/index.html` |
+| `ui/SettingsScreen.kt` | The key, the money sources, the voice | `config.toml`, in Termux |
+| `ui/LockScreen.kt` | Fingerprint or PIN on open | new — Termux could not ask |
+| `android/Lock.kt` | What this phone can be asked for | new |
 
 **The split is the point.** `core/` has no Android imports, which is what lets
 the router, the time parser and the reply tables be tested the way they were in
@@ -168,14 +199,19 @@ two chips is the proof.
   which table matched, not from what the recogniser assumed, so the toggle
   corrects itself after one Greek sentence.
 - **The key is not encrypted at rest.** It sits in app-private storage, which
-  other apps cannot read — that is the threat model this holds off. It is not
-  protection against someone with your unlocked phone.
+  other apps cannot read — that is the threat model this holds off. Against
+  someone holding your unlocked phone, the answer is the app lock in
+  **Settings → Opening the app**: a fingerprint, PIN or password on open, off
+  until you turn it on. That is a screen that is not composed rather than
+  encryption — it stops a person, not a forensic image of the device — and if you
+  remove your phone's screen lock it stops applying, because there is then nothing
+  to prove who you are with.
 
 ## What still needs doing
 
-- A settings screen for the Wise token and the bank SMS senders. Both have
-  setters and no UI, so today only the manual figure source is reachable.
 - Revolut, which has no personal API and needs an open-banking consent flow.
 - An assist-gesture handoff that starts listening immediately rather than
   waiting for the button.
-- The voice preference is a field with no UI in front of it.
+- The Wise request has still never been made against the real API. **Settings →
+  Money → Check sources now** is how you find out; until someone taps it, that
+  source is shipped unverified.

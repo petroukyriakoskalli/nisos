@@ -5,16 +5,34 @@ package app.nisos.core
  *
  * One turn, start to finish:
  * ```
- *   transcript ──► router ──┬─ hit ──► execute every step ──► one reply
- *                           │
- *                           └─ miss ─► Claude ──► execute every step ──► one reply
+ *   transcript ──► router ──┬─ hit ──► every step ──┬─ ordinary ─► do it ──┐
+ *                           │                       │                      ├─► one reply
+ *                           └─ miss ─► Claude ──────┴─ in PREVIEW ─► ask ──┘
+ *                                                                     │
+ *                                            approve() ◄──────────────┘ (or decline())
  * ```
  *
  * Everything here is orchestration. The interesting decisions live in
  * [route], [REGISTRY] and [SAY]. This is deliberately the only file that knows
- * the order of operations, so a confirmation step before destructive actions,
- * or a conversation history, is a change in exactly one place.
+ * the order of operations -- which is what made the confirmation step below a
+ * change in one place, and is what would make a conversation history the same.
  */
+
+/**
+ * Something held back until you say yes, and the words to ask with.
+ *
+ * @property step exactly what will run on approval -- the same [Step], not a
+ *   re-derived one, so nothing can drift between the question and the answer.
+ * @property question what to say and show. Already in the turn's language.
+ * @property detail one line naming what would be written.
+ * @property title what the thing is called.
+ */
+data class Pending(
+    val step: Step,
+    val question: String,
+    val detail: String,
+    val title: String,
+)
 
 /** Everything that happened in one exchange, for the screen and the log. */
 data class Turn(
@@ -28,7 +46,16 @@ data class Turn(
     /** Which brain answered. Empty on a routed turn, where none did. */
     val backend: String = "",
     val millis: Long = 0,
+    /**
+     * Steps that were **not** carried out, awaiting approval.
+     *
+     * Non-empty means the turn is unfinished: it asked a question and is
+     * waiting. Nothing in here has touched the phone.
+     */
+    val pending: List<Pending> = emptyList(),
 ) {
+    val awaitingApproval: Boolean get() = pending.isNotEmpty()
+
     /**
      * One line describing the turn.
      *
@@ -91,22 +118,108 @@ fun handle(
     // στείλε στη Μαρία» has no reason to leave the torch off because the
     // message failed. Each step contributes its own sentence, so the reply
     // says which half worked.
-    val spoken = stitch(steps.map { step ->
+    //
+    // A step in [PREVIEW] is the exception: it is described rather than done,
+    // and waits. Order is still preserved, so «άναψε τον φακό και βάλε
+    // ραντεβού αύριο στις πέντε» lights the torch now and asks about the
+    // appointment -- holding back the harmless half as well would be friction
+    // for nothing.
+    val held = mutableListOf<Pending>()
+    val sentences = mutableListOf<String>()
+
+    for (step in steps) {
+        if (step.action in PREVIEW) {
+            val proposal = propose(step, language)
+            if (proposal == null) {
+                // The arguments do not parse -- most often a time phrase it
+                // could not read. Say so now rather than after a tap, because
+                // the tap would be approving something that was never
+                // understood, and the failure would arrive looking like the
+                // approval had caused it.
+                sentences += say("failed", language)
+            } else {
+                held += proposal
+                sentences += proposal.question
+            }
+            continue
+        }
         val (key, fields) = execute(step.action, step.args, phone)
-        say(key, language, fields)
-    })
+        sentences += say(key, language, fields)
+    }
 
     return Turn(
         heard = text,
         language = language,
         action = steps.firstOrNull()?.action ?: "unclear",
         steps = steps,
-        spoken = spoken,
+        spoken = stitch(sentences),
         path = path,
         backend = backend,
         millis = System.currentTimeMillis() - started,
+        pending = held,
     )
 }
+
+/** Describe a step, or null when its arguments cannot be read. */
+private fun propose(step: Step, language: String): Pending? {
+    val preview = PREVIEW[step.action] ?: return null
+    val fields = try {
+        preview(step.args, language)
+    } catch (_: Exception) {
+        return null
+    }
+    return Pending(
+        step = step,
+        question = say("${step.action}.confirm", language, fields),
+        detail = say("${step.action}.detail", language, fields),
+        title = fields["summary"]?.toString().orEmpty(),
+    )
+}
+
+/**
+ * Carry out what was held back, now that it has been approved.
+ *
+ * Runs the stored [Step] verbatim rather than re-deriving anything from the
+ * original sentence. What you approved is what runs.
+ */
+fun approve(
+    pending: List<Pending>,
+    phone: Phone,
+    language: String,
+    heard: String = "",
+): Turn {
+    val started = System.currentTimeMillis()
+    val spoken = stitch(
+        pending.map { waiting ->
+            val (key, fields) = execute(waiting.step.action, waiting.step.args, phone)
+            say(key, language, fields)
+        }
+    )
+    return Turn(
+        heard = heard,
+        language = language,
+        action = pending.firstOrNull()?.step?.action ?: "unclear",
+        steps = pending.map { it.step },
+        spoken = spoken,
+        path = "approved",
+        millis = System.currentTimeMillis() - started,
+    )
+}
+
+/**
+ * Say that nothing was done.
+ *
+ * Takes no [Phone] on purpose -- declining cannot touch anything, and a
+ * signature that could not reach the phone even by accident is the cheapest
+ * possible proof of that.
+ */
+fun decline(language: String, heard: String = ""): Turn = Turn(
+    heard = heard,
+    language = language,
+    action = "cancelled",
+    spoken = say("cancelled", language),
+    path = "declined",
+)
 
 private fun failure(
     text: String,
