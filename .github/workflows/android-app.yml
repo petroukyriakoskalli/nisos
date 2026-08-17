@@ -65,12 +65,21 @@ jobs:
       # is skipped and the build falls back to the plugin's generated debug key.
       # It still produces a working APK; it just cannot update an install that
       # was signed by the real key.
+      # The absence check is inside the script, not in an `if:`. A step-level
+      # `if` referring to the secrets context fails the whole workflow at
+      # validation time -- no jobs, no logs, just a red run -- which is how the
+      # first attempt at this broke.
       - name: Restore the signing key
-        if: ${{ secrets.NISOS_KEYSTORE_B64 != '' }}
         env:
           KEYSTORE_B64: ${{ secrets.NISOS_KEYSTORE_B64 }}
         run: |
           set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "  no NISOS_KEYSTORE_B64 secret set"
+            echo "  falling back to the plugin's generated debug key"
+            echo "  this APK will NOT be able to update an install signed by the real key"
+            exit 0
+          fi
           printf '%s' "$KEYSTORE_B64" | base64 -d > nisos.jks
           echo "  restored $(stat -c%s nisos.jks) bytes"
           # Print the fingerprint, so "is every build signed the same?" is a
