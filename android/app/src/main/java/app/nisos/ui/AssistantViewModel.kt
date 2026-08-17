@@ -14,8 +14,11 @@ import app.nisos.android.Ears
 import app.nisos.android.Memory
 import app.nisos.android.Voice
 import app.nisos.core.ClaudeBrain
+import app.nisos.core.Pending
 import app.nisos.core.SmsBalanceSource
 import app.nisos.core.Turn
+import app.nisos.core.approve
+import app.nisos.core.decline
 import app.nisos.core.handle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -34,6 +37,11 @@ data class AssistantState(
     val spoken: String = "",
     val actions: List<String> = emptyList(),
     val language: String = "el",
+    /**
+     * Held back, awaiting a tap. Non-empty means the card is up and nothing has
+     * been written yet.
+     */
+    val pending: List<Pending> = emptyList(),
     val busy: Boolean = false,
     val busyLabel: String = "",
     val brainLabel: String = "",
@@ -301,6 +309,9 @@ class AssistantViewModel(context: Context) : ViewModel() {
             heard = "",
             spoken = "",
             actions = emptyList(),
+            // Talking again abandons whatever was waiting. An un-approved
+            // appointment must not stay tappable behind a new command.
+            pending = emptyList(),
         )
 
         // The ring is driven by the recogniser's own amplitude callback, so
@@ -332,7 +343,9 @@ class AssistantViewModel(context: Context) : ViewModel() {
     /** Run a typed command. The same path, minus the microphone. */
     fun handleText(text: String) {
         if (text.isBlank() || _state.value.busy) return
-        _state.value = _state.value.copy(heard = text, spoken = "", actions = emptyList())
+        _state.value = _state.value.copy(
+            heard = text, spoken = "", actions = emptyList(), pending = emptyList(),
+        )
         run(text)
     }
 
@@ -365,30 +378,84 @@ class AssistantViewModel(context: Context) : ViewModel() {
                 )
             }
             ticker.cancel()
+            settle(turn)
+        }
+    }
 
-            _state.value = _state.value.copy(
-                mood = if (turn.action in FAILURES) Mood.Failed else Mood.Speaking,
-                busy = false,
-                busyLabel = "",
-                spoken = turn.spoken,
-                actions = turn.steps.map { it.action },
-                // The router decides the language, so a Greek sentence spoken
-                // while the toggle says English corrects the toggle rather
-                // than being answered in the wrong language.
-                language = turn.language,
-                brainLabel = brainLabel(),
-            )
+    /**
+     * Put a finished turn on screen and say it.
+     *
+     * Shared by the three ways a turn can end -- run, approved, declined --
+     * because the alternative is three copies of the mood rules and the
+     * back-to-idle timing, which is how two of them quietly drift apart.
+     */
+    private suspend fun settle(turn: Turn) {
+        _state.value = _state.value.copy(
+            mood = if (turn.action in FAILURES) Mood.Failed else Mood.Speaking,
+            busy = false,
+            busyLabel = "",
+            spoken = turn.spoken,
+            actions = turn.steps.map { it.action },
+            // The router decides the language, so a Greek sentence spoken
+            // while the toggle says English corrects the toggle rather
+            // than being answered in the wrong language.
+            language = turn.language,
+            brainLabel = brainLabel(),
+            // Whatever is waiting after this turn -- normally nothing. Assigned
+            // rather than merged, so a new command clears a card left over from
+            // the last one: if you have moved on, the old appointment has not
+            // been approved and must not stay tappable.
+            pending = turn.pending,
+        )
 
-            voice.speak(turn.spoken, turn.language)
+        voice.speak(turn.spoken, turn.language)
 
-            // Back to idle once it has plausibly finished speaking. Android's
-            // TTS will tell you properly through an UtteranceProgressListener;
-            // this is the cheap version and the cost of being wrong is a ring
-            // that stays lit a moment too long.
-            delay(400L + turn.spoken.length * 55L)
-            if (_state.value.mood == Mood.Speaking) {
-                _state.value = _state.value.copy(mood = Mood.Idle)
+        // Back to idle once it has plausibly finished speaking. Android's
+        // TTS will tell you properly through an UtteranceProgressListener;
+        // this is the cheap version and the cost of being wrong is a ring
+        // that stays lit a moment too long.
+        delay(400L + turn.spoken.length * 55L)
+        if (_state.value.mood == Mood.Speaking) {
+            _state.value = _state.value.copy(mood = Mood.Idle)
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Approval
+    //
+    // `calendar.add` is held back by [handle] and waits here. Nothing has
+    // touched the calendar at this point -- the [Pending] carries the exact
+    // [app.nisos.core.Step] that will run, so what was shown is what runs.
+    // ----------------------------------------------------------------------
+
+    /** Do the thing that was held back. */
+    fun confirm() {
+        val waiting = _state.value.pending
+        if (waiting.isEmpty() || _state.value.busy) return
+
+        _state.value = _state.value.copy(
+            // Cleared before the work rather than after, so a second tap on a
+            // slow write cannot add the appointment twice.
+            pending = emptyList(),
+            mood = Mood.Thinking,
+            busy = true,
+            busyLabel = "Adding",
+        )
+
+        viewModelScope.launch {
+            val turn = withContext(Dispatchers.IO) {
+                approve(waiting, phone, _state.value.language, _state.value.heard)
             }
+            settle(turn)
+        }
+    }
+
+    /** Say no. Touches nothing -- [decline] cannot reach the phone. */
+    fun cancel() {
+        if (_state.value.pending.isEmpty()) return
+        _state.value = _state.value.copy(pending = emptyList())
+        viewModelScope.launch {
+            settle(decline(_state.value.language, _state.value.heard))
         }
     }
 

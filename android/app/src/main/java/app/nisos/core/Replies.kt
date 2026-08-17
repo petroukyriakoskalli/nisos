@@ -54,6 +54,24 @@ val SAY: Map<String, Map<String, String>> = mapOf(
         "en" to "{summary}, {date} at {time}.",
         "el" to "{summary}, {date} στις {time}.",
     ),
+    // Asked before anything is written -- see PREVIEW in Actions.kt. It reads
+    // the whole event back as a question, naming the **weekday**, because the
+    // point of asking is to give you the chance to hear «αύριο στις πέντε»
+    // land on the wrong day -- and "11/08" does not tell you that, while
+    // "Tuesday" does.
+    "calendar.add.confirm" to mapOf(
+        "en" to "Add {summary} — {weekday} {date} at {time}?",
+        "el" to "Να βάλω {summary} — {weekday} {date} στις {time};",
+    ),
+    // The second line of the card. Only what the question left out: the
+    // duration. 30 minutes is the default and saying it aloud every time is
+    // noise, but seeing it costs nothing.
+    "calendar.add.detail" to mapOf(
+        "en" to "{minutes} minutes",
+        "el" to "{minutes} λεπτά",
+    ),
+    // Declining is not a failure, and must not sound like one.
+    "cancelled" to mapOf("en" to "Left it alone.", "el" to "Δεν το έβαλα."),
     "time.read" to mapOf("en" to "It's {time}.", "el" to "Η ώρα είναι {time}."),
     // {note} carries the honesty: how many sources answered when not all did,
     // other currencies, and how old the oldest reading is. Empty on the happy
@@ -142,4 +160,23 @@ fun missingReplies(
     languages: List<String> = listOf("en", "el"),
 ): List<Pair<String, String>> = actions.flatMap { action ->
     languages.filter { SAY[action]?.containsKey(it) != true }.map { action to it }
+}
+
+/**
+ * Actions in [PREVIEW] with no wording to confirm them with.
+ *
+ * The same guard as [missingReplies], for the other table. An action marked as
+ * needing approval but missing its `.confirm` phrase would ask the user to
+ * approve the literal string `calendar add confirm` -- [say] never throws, so
+ * nothing else would catch it.
+ */
+fun missingConfirmations(
+    actions: Collection<String> = PREVIEW.keys,
+    languages: List<String> = listOf("en", "el"),
+): List<Pair<String, String>> = actions.flatMap { action ->
+    languages.flatMap { language ->
+        listOf("$action.confirm", "$action.detail")
+            .filter { SAY[it]?.containsKey(language) != true }
+            .map { it to language }
+    }
 }

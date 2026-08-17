@@ -1,6 +1,7 @@
 package app.nisos.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
@@ -161,19 +162,118 @@ class LoopTest {
         assertTrue(result.spoken.isNotEmpty())
     }
 
-    // -- Appointments --------------------------------------------------------
+    // -- Appointments, which now wait to be approved -------------------------
 
-    @Test fun `an appointment reaches the calendar and is read back`() {
+    /**
+     * The load-bearing half of a confirmation: **nothing is written**. If this
+     * test ever passes with an event in `phone.calls`, the approval step has
+     * become decoration.
+     */
+    @Test fun `an appointment waits and writes nothing`() {
         val phone = Recorder()
         val result = turnWith(phone, "βάλε στο ημερολόγιο οδοντίατρο αύριο στις πέντε")
+
         assertEquals("calendar.add", result.action)
-        assertTrue(phone.calls.any { it.startsWith("event:οδοντίατρο:2026-08-11T17:00") })
-        assertEquals("οδοντίατρο, 11/08 στις 17:00.", result.spoken)
+        assertTrue(result.awaitingApproval)
+        assertEquals(emptyList<String>(), phone.calls)
+    }
+
+    /**
+     * The question reads the whole event back, **weekday included**.
+     *
+     * 10 Aug 2026 is a Monday, so "tomorrow" is Tuesday the 11th. The weekday is
+     * the point of the exercise: "11/08" does not tell you which day that is, and
+     * working it out is exactly the work nobody does.
+     */
+    @Test fun `the question names the day it landed on`() {
+        val result = turnWith(Recorder(), "put dentist in my calendar tomorrow at 5")
+        val waiting = result.pending.single()
+
+        assertTrue(waiting.question, waiting.question.startsWith("Add "))
+        assertTrue(waiting.question, waiting.question.contains("Tuesday 11/08 at 17:00"))
+        assertTrue(waiting.question, waiting.question.endsWith("?"))
+        assertEquals("30 minutes", waiting.detail)
+        assertEquals(waiting.question, result.spoken)
+    }
+
+    @Test fun `the weekday is named in the language being spoken`() {
+        val waiting = turnWith(Recorder(), "βάλε στο ημερολόγιο οδοντίατρο αύριο στις πέντε")
+            .pending.single()
+
+        assertEquals("οδοντίατρο", waiting.title)
+        assertEquals("30 λεπτά", waiting.detail)
+        assertTrue(waiting.question, waiting.question.startsWith("Να βάλω οδοντίατρο"))
+        assertTrue(waiting.question, waiting.question.endsWith(";"))   // Greek question mark
+        assertTrue(waiting.question, waiting.question.contains("11/08 στις 17:00"))
+        assertFalse(waiting.question, waiting.question.contains("Tuesday"))
+    }
+
+    /** Approving runs the stored step, so what was shown is what gets written. */
+    @Test fun `approving writes exactly what was offered`() {
+        val phone = Recorder()
+        val asked = turnWith(phone, "βάλε στο ημερολόγιο οδοντίατρο αύριο στις πέντε")
+
+        val done = approve(asked.pending, phone, asked.language, asked.heard)
+
+        assertEquals("approved", done.path)
+        assertEquals("calendar.add", done.action)
+        assertEquals(listOf("event:οδοντίατρο:2026-08-11T17:00:30"), phone.calls)
+        assertEquals("οδοντίατρο, 11/08 στις 17:00.", done.spoken)
+        assertTrue(done.pending.isEmpty())
+    }
+
+    @Test fun `declining writes nothing and does not sound like a failure`() {
+        val phone = Recorder()
+        val asked = turnWith(phone, "βάλε στο ημερολόγιο οδοντίατρο αύριο στις πέντε")
+
+        val done = decline(asked.language, asked.heard)
+
+        assertEquals(emptyList<String>(), phone.calls)
+        assertEquals("cancelled", done.action)
+        assertEquals("Δεν το έβαλα.", done.spoken)
+    }
+
+    /**
+     * Holding the appointment back must not hold the torch back. They were two
+     * separate requests, and making the reversible one wait on a tap is friction
+     * bought for nothing.
+     */
+    @Test fun `the harmless half of a two-part turn still happens`() {
+        val phone = Recorder()
+        val result = turnWith(phone, "torch on and put dentist in my calendar tomorrow at 5")
+
+        assertTrue(phone.torchOn)
+        assertEquals(listOf("torch:true"), phone.calls)
+        assertEquals(1, result.pending.size)
+        assertTrue(result.spoken, result.spoken.startsWith("Torch on."))
+        assertTrue(result.spoken, result.spoken.contains("Tuesday 11/08"))
+    }
+
+    /**
+     * An unreadable time fails now, not after a tap. Approving something that
+     * was never understood would make the failure look like the approval caused
+     * it -- and would put a card on screen describing nothing.
+     */
+    @Test fun `an appointment with no readable time fails before it is offered`() {
+        val phone = Recorder()
+        val brain = Brain { _, _, _ ->
+            Decision.fromSteps(listOf(Step("calendar.add", mapOf("summary" to "dentist"))))
+        }
+        val result = handle("summarise this note", phone, brain, "en", emptyMap(), routes)
+
+        assertTrue(result.pending.isEmpty())
+        assertEquals(emptyList<String>(), phone.calls)
+        assertEquals("That didn't work.", result.spoken)
     }
 
     // -- Replies stay in step ------------------------------------------------
 
     @Test fun `every action has both languages`() {
         assertEquals(emptyList<Pair<String, String>>(), missingReplies())
+    }
+
+    /** Every action that asks for approval has the words to ask with. */
+    @Test fun `every previewed action has confirmation wording`() {
+        assertEquals(emptyList<Pair<String, String>>(), missingConfirmations())
     }
 }

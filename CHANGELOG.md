@@ -30,6 +30,43 @@
 
 ### Added
 
+- **An appointment is shown to you before it is written.** `calendar.add` no
+  longer happens when you say it. The turn reads the event back as a question —
+  *"Add dentist — Tuesday 11/08 at 17:00?"* — and waits for **Add** or **No**.
+  Nothing has touched the calendar until you tap.
+
+  It is the only action that waits, and the reasoning is specific rather than
+  general caution. The torch is undone by saying the opposite. A message is gone,
+  but you dictated its text. An appointment is a **silent edit to something you
+  will not open until the day it matters**, made from a time phrase that had to
+  be *interpreted* — and if «αύριο στις πέντε» lands on the wrong day, you find
+  out by missing it.
+
+  The question names the **weekday**, which is the whole reason it is worth
+  reading: "11/08" does not tell you which day that is, and working it out is
+  exactly the work nobody does. "Tuesday" is checked at a glance. It is named in
+  whichever language is being spoken, so a Greek reply says «Τρίτη».
+
+  **The preview and the write go through one parser.** `proposeEvent` is called
+  by both, so the card cannot show one event while the action files another. A
+  confirmation built from a second parser is theatre — it would agree with you
+  right up until it mattered, and you would have stopped checking by then. There
+  is a test whose entire job is to assert that the phone was **not** called.
+
+  Two smaller decisions. Arguments that do not parse fail *immediately* rather
+  than after the tap, because approving something that was never understood makes
+  the failure look like the approval caused it. And a turn that does two things
+  only holds back the half that needs holding: «άναψε τον φακό και βάλε ραντεβού
+  αύριο στις πέντε» lights the torch now and asks about the appointment, since
+  making the reversible half wait is friction bought for nothing.
+
+  How it generalises: membership of `PREVIEW` in `Actions.kt` is what makes an
+  action need approval, and that same map supplies the fields it is described
+  with — so an action cannot be marked as needing confirmation without also
+  providing the words to confirm it with. `missingConfirmations()` fails a test
+  if the phrasing is missing in either language, the same way `missingReplies()`
+  already did for actions.
+
 - **A settings screen.** Three of the four money sources were unreachable:
   Wise needs a token and the bank sources need sender names, and both had
   setters in `Memory` with no UI in front of them — so «πόσα λεφτά έχω» could

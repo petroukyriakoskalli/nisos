@@ -159,7 +159,11 @@ private fun Assistant(model: AssistantViewModel, onSettings: () -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Did(state)
+                    // The card replaces the reply rather than sitting under it.
+                    // The question is already spoken and the card restates it,
+                    // so showing both would say the same thing twice in the one
+                    // place where the wording has to be read carefully.
+                    if (state.pending.isNotEmpty()) Approval(model, state) else Did(state)
                     Spacer(Modifier.height(20.dp))
                     Controls(model, state)
                 }
@@ -281,6 +285,84 @@ private fun Did(state: AssistantState) {
             contentPadding = PaddingValues(horizontal = 4.dp),
         ) {
             items(state.actions) { name -> ActionChip(name) }
+        }
+    }
+}
+
+/**
+ * What it is about to write, and a way to stop it.
+ *
+ * The only action that waits is `calendar.add`, and it waits because it is the
+ * only one that writes something durable into a place you will not look until
+ * the day it matters -- from a time phrase that had to be *interpreted*. The
+ * torch is undone by saying the opposite; a wrong appointment is found weeks
+ * later by missing it.
+ *
+ * The question names the **weekday** rather than only the date, because that is
+ * the part that catches «αύριο στις πέντε» landing on the wrong day. Both the
+ * question and the write come from one parser, so this cannot show you one event
+ * and file another.
+ */
+@Composable
+private fun Approval(model: AssistantViewModel, state: AssistantState) {
+    Surface(
+        color = Color(0xFF35E0F0).copy(alpha = 0.07f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            state.pending.forEach { waiting ->
+                Text(
+                    waiting.question,
+                    color = Color(0xFF9BE9F2),
+                    fontSize = 16.sp,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 23.sp,
+                )
+                if (waiting.detail.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        waiting.detail,
+                        color = Color(0xFF4A5D6E),
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // Declining is the wider, plainer button and comes first. The
+                // whole point of the step is that it is easy not to write.
+                Button(
+                    onClick = { model.cancel() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF16202A),
+                        contentColor = Color(0xFF8A9AAA),
+                    ),
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.weight(1f).height(46.dp),
+                ) { Text("No", fontSize = 14.sp) }
+
+                Button(
+                    onClick = { model.confirm() },
+                    enabled = !state.busy,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF35E0F0).copy(alpha = 0.22f),
+                        contentColor = Color(0xFF9BE9F2),
+                        disabledContainerColor = Color(0xFF16202A),
+                        disabledContentColor = Color(0xFF3A4A5A),
+                    ),
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.weight(1f).height(46.dp),
+                ) { Text("Add", fontSize = 14.sp, letterSpacing = 1.sp) }
+            }
         }
     }
 }

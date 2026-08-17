@@ -2,6 +2,7 @@ package app.nisos.core
 
 import java.time.Duration
 import java.time.LocalDateTime
+import java.time.format.TextStyle
 import java.util.Locale
 
 /**
@@ -37,6 +38,85 @@ class ActionError(message: String) : Exception(message)
 
 /** What one calendar entry looks like coming back off the phone. */
 data class CalendarEntry(val summary: String, val minutesAway: Int)
+
+/** Exactly the event a `calendar.add` would write. */
+data class Proposal(val summary: String, val start: LocalDateTime, val minutes: Int) {
+    val date: String
+        get() = String.format(Locale.ROOT, "%02d/%02d", start.dayOfMonth, start.monthValue)
+    val time: String
+        get() = String.format(Locale.ROOT, "%02d:%02d", start.hour, start.minute)
+
+    /**
+     * The day of the week, named, in the language being spoken.
+     *
+     * The single most useful field in a confirmation. «αύριο στις πέντε» landing
+     * on the wrong day is the failure this whole step exists to catch, and
+     * "11/08" does not catch it -- you have to work out what day that is, which
+     * is exactly the work nobody does. "Tuesday" catches it instantly.
+     */
+    fun weekday(language: String): String = start.dayOfWeek.getDisplayName(
+        TextStyle.FULL,
+        if (language == "el") Locale.forLanguageTag("el") else Locale.UK,
+    )
+}
+
+/**
+ * Read a `calendar.add`'s arguments into the event it would create.
+ *
+ * Pulled out of the action so that the confirmation and the write go through
+ * **one** parser. That is the whole load-bearing property: a preview built from
+ * a second parser is theatre -- it would show you the event you meant while the
+ * action wrote a different one, and a confirmation that can disagree with what
+ * it confirms is worse than no confirmation, because you would stop checking.
+ *
+ * The day it lands on and the hour it picks are the two things most likely to be
+ * wrong, and both are invisible until you open the calendar.
+ */
+fun proposeEvent(args: Map<String, Any?>): Proposal {
+    val summary = args.string("summary")
+    if (summary.isEmpty()) throw ActionError("no title heard")
+    val start = momentOf(args["start"])
+        ?: throw ActionError("couldn't read the time ${args["start"]}")
+    val minutes = (args.int("minutes") ?: DEFAULT_MINUTES).coerceAtLeast(1)
+    return Proposal(summary, start, minutes)
+}
+
+/**
+ * Actions that describe themselves before they happen, and the fields they
+ * describe themselves with.
+ *
+ * Membership here is what makes an action need approval -- see [handle]. The two
+ * are deliberately the same set: you cannot mark something as needing a
+ * confirmation without also supplying the words to confirm it with, so there is
+ * no way to end up with a dialogue that asks "are you sure?" about nothing in
+ * particular.
+ *
+ * `calendar.add` is here because it is the only action that writes something
+ * durable to a place you did not look. The torch is reversible by saying the
+ * opposite; a message is gone but you dictated its text; an appointment is a
+ * silent edit to a calendar you will not open until the day it matters, made
+ * from a time phrase that had to be *interpreted*.
+ *
+ * To add one: put it here with a lambda returning its fields, then add
+ * `<action>.confirm` and `<action>.detail` to [SAY] in both languages. A test
+ * fails if you forget either.
+ *
+ * The lambda takes the language because a field can be a *word* rather than a
+ * number -- the weekday is, and a confirmation that says "Tuesday" to someone
+ * being answered in Greek is not a confirmation they will read carefully.
+ */
+val PREVIEW: Map<String, (Map<String, Any?>, String) -> Map<String, Any>> = mapOf(
+    "calendar.add" to { args, language ->
+        val event = proposeEvent(args)
+        mapOf(
+            "summary" to event.summary,
+            "date" to event.date,
+            "time" to event.time,
+            "minutes" to event.minutes,
+            "weekday" to event.weekday(language),
+        )
+    },
+)
 
 /**
  * Everything an action needs to reach the outside world.
@@ -180,17 +260,17 @@ val REGISTRY: Map<String, Handler> = mapOf(
 
     // The action that used to need a Tasker task, an answer file on shared
     // storage, and a permission Termux could not hold. It is now four lines.
+    // Reached only after approval -- [handle] holds this action back and asks
+    // first. The parse is shared with the confirmation so the event written here
+    // is provably the one you were shown; see [proposeEvent].
     "calendar.add" to { args, phone ->
-        val summary = args.string("summary")
-        if (summary.isEmpty()) throw ActionError("no title heard")
-        val start = momentOf(args["start"])
-            ?: throw ActionError("couldn't read the time ${args["start"]}")
-        val minutes = (args.int("minutes") ?: DEFAULT_MINUTES).coerceAtLeast(1)
-        phone.addEvent(summary, start, minutes)
+        val event = proposeEvent(args)
+        phone.addEvent(event.summary, event.start, event.minutes)
         mapOf(
-            "summary" to summary,
-            "date" to String.format(Locale.ROOT, "%02d/%02d", start.dayOfMonth, start.monthValue),
-            "time" to String.format(Locale.ROOT, "%02d:%02d", start.hour, start.minute),
+            "summary" to event.summary,
+            "date" to event.date,
+            "time" to event.time,
+            "minutes" to event.minutes,
         )
     },
 
