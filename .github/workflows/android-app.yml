@@ -14,15 +14,20 @@
 
 name: Android app
 
+# The smoke script is listed as well as the workflow. It is *part* of the
+# workflow -- leaving it out meant editing the smoke test could not trigger the
+# smoke test, so a fix to it sat unrun and looked as though CI had stalled.
 on:
   push:
     branches: ["**"]
     paths:
       - "android/**"
       - ".github/workflows/android-app.yml"
+      - ".github/smoke.sh"
   pull_request:
     paths:
       - "android/**"
+      - ".github/smoke.sh"
   workflow_dispatch:
 
 permissions:
